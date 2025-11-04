@@ -33,11 +33,11 @@ For example, with one station, rotating constantly, it will identify the bearing
 A passive radar system does not transmit any signal. Common radars use Continuous Wave or Pulses using a Tx antenna measuring the time of the signal coming back. Passive radar systems use ambient RF emmisions. In our example we will be using the emissions from a drone target. 
 
 ## The Flow from RF Emission to DSP
-1. Drone transmits RF signal from its Tx antenna
+### 1. Drone transmits RF signal from its Tx antenna
 
-2. Signal will propagate through space
+### 2. Signal will propagate through space
 
-3. Yagi antenna will receive signal
+### 3. Yagi antenna will receive signal
 - This antenna is highly directional $(30-50\degree beamwidth)$
 - *Learn more about Yagi Antenna*
 
@@ -54,27 +54,27 @@ Narrow beams regect signals from other directions, removing unwanted noise.
 - Frequency is $5.8 GHz$ which is too fast to see on device like oscilloscope
 - Waveform is modulated data: **OFDM** = hudnreds of subcarriers turning on/off
 
-4. Induced current in antenna
+### 4. Induced current in antenna
 - Electric field oscillates free electrons inside antenna
 - Voltage is induced in **driven element**
 - Parasitic elements reinforce forward beam
 
-5. Signal is fed through coax
+### 5. Signal is fed through coax
 
-6. Low Noise Amplificatino (LNA) 
+### 6. Low Noise Amplificatino (LNA) 
 - Noise amplifier will need to boost the weak signal
 - Preserves **Signal-to-noise ratio (SNR)**
 
-Once the signal is sent through an LNA it will amplify the voltage to $~0.1-1 V$ peak. LNA gain provides $~+30dB \to x31.6$ in voltage. Frequency has not changed yet. Waveform is still chaotic but can see on spectrum analyzer. This is the **Power Spectral Density**.
+Once the signal is sent through an LNA it will amplify the voltage to ~0.1-1 V peak. LNA gain provides ~+30dB \to x31.6 in voltage. Frequency has not changed yet. Waveform is still chaotic but can see on spectrum analyzer. This is the **Power Spectral Density**.
 
-7. Downconversion to baseband or IF
+### 7. Downconversion to baseband or IF
 - *Need to understand this better...*
 - 5.8 Ghz signal is mixed with a local oscillator (LO) which produces:
     - **Intermediate Frequency (IF)**
     - **Direct I/Q baseband**
 - This enables digital sampling
 
-After downconverter, $5.8 GHz$ signal is shifted down to more manageable frequency. 
+After downconverter, 5.8 GHz signal is shifted down to more manageable frequency. 
 - Local Oscillator (LO) = 5.78 GHz
 - Mixer output = IF = 5.8 - 5.78 = 20 MHz
 
