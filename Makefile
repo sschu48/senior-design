@@ -9,7 +9,7 @@ PYTEST := $(VENV)/bin/pytest
 
 .DEFAULT_GOAL := help
 
-.PHONY: help venv test test-quick test-hardware run-radar run-pipeline run-pipeline-headless run-live run-live-headless spectrum setup clean clean-all
+.PHONY: help venv test test-quick test-hardware run-radar run-pipeline run-pipeline-headless run-live run-live-headless spectrum spectrum-live setup clean clean-all
 
 help: ## Show available targets
 	@echo "SENTINEL Development Commands"
@@ -49,8 +49,11 @@ run-live-headless: venv ## Run live pipeline headless
 test-hardware: venv ## Run hardware-dependent tests (requires USRP)
 	$(PYTEST) -v -m hardware
 
-spectrum: venv ## Launch spectrum analyzer tool
+spectrum: venv ## Launch spectrum analyzer (synthetic signals)
 	$(PYTHON) -m src.ui.spectrum
+
+spectrum-live: venv ## Launch spectrum analyzer (live USRP B210)
+	$(PYTHON) -m src.ui.spectrum --live
 
 setup: ## Run Ubuntu setup script
 	bash scripts/setup-ubuntu.sh

@@ -471,8 +471,8 @@ Frontend → REST API → DSP Pipeline
 | Packet Decode | opendroneid-core-c (Python bindings), custom DJI decoder |
 | Async Pipeline | asyncio |
 | Database | SQLite3 (stdlib) |
-| Backend API | FastAPI (WebSocket + REST) |
-| Frontend | Existing Express + Socket.IO app, evolve to React later |
+| Backend API | Express.js + Socket.IO (WebSocket + REST) |
+| Frontend | Express + Socket.IO app, evolve to React later |
 | Antenna Control | GPIO/serial via Python (RPi.GPIO or pyserial) |
 | Config | YAML (config.yaml) |
 | Logging | Python logging → JSON structured output |

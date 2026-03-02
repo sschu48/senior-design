@@ -48,7 +48,7 @@ sentinel/
 │   ├── sdr/                ← SDR capture, tuning, sample streaming
 │   ├── dsp/                ← filters, FFT, detection algorithms
 │   ├── antenna/            ← pan/tilt control, scan patterns
-│   ├── tracker/            ← target state machine, bearing logic
+│   ├── pipeline/           ← async detection engine
 │   └── ui/                 ← live display / dashboard
 ├── tests/
 │   ├── unit/
@@ -65,7 +65,7 @@ sentinel/
 ## ⚡ CODING RULES
 
 1. **Language:** Python primary. C/C++ for perf-critical DSP if needed.
-2. **SDR lib:** `SoapySDR` for hardware abstraction. `pyrtlsdr` as fallback.
+2. **SDR lib:** `UHD` Python API for USRP B210. `SoapySDR` as fallback.
 3. **DSP:** `numpy` + `scipy.signal`. No reinventing FFT.
 4. **Async:** Use `asyncio` for the capture/process pipeline. No blocking calls on the main thread.
 5. **Config:** All hardware params (gain, sample rate, freq, scan limits) in `config.yaml`. Zero hardcoded values.
@@ -88,11 +88,11 @@ sentinel/
 | FrSky | 2.4GHz | FHSS | Legacy RC |
 | Spektrum DSM2/DSMX | 2.4GHz | FHSS | Legacy RC |
 
-### SDR Baseline
-- **Hardware target:** RTL-SDR v3, HackRF, or RSP1A
-- **Sample rate:** 2.4–3.2 MSPS
-- **Tuning:** 2.400–2.500 GHz sweep or fixed channel
-- **IQ format:** 32-bit float complex (`.cf32`)
+### SDR Hardware
+- **Primary:** USRP B210 (dual RX, MIMO 30.72 MSPS/channel)
+- **Interface:** UHD Python API
+- **Center freq:** 2.437 GHz (WiFi Ch 6 — RemoteID default)
+- **IQ format:** 32-bit float complex (numpy complex64)
 
 ### Antenna System
 - **Type:** High-gain directional (Yagi or patch)
@@ -215,15 +215,19 @@ When beginning a new work session, Claude should:
 
 ```
 [PHASE 1: FOUNDATION]  ← YOU ARE HERE
-  ✦ SDR capture pipeline
-  ✦ Basic FFT detection
-  ✦ Antenna control scaffold
-  ✦ Config system
+  ✦ SDR capture pipeline (SyntheticSource + USRPSource)
+  ✦ Basic FFT detection (Welch PSD)
+  ✦ CFAR detection (CA-CFAR on yagi channel)
+  ✦ Antenna control scaffold (SimulatedController)
+  ✦ Config system (frozen dataclasses)
+  ○ RemoteID decoder integration
+  ○ DJI DroneID decoder integration
+  ○ Radar app ↔ pipeline WebSocket
 
 [PHASE 2: DETECTION]
-  ○ CFAR threshold
+  ○ CFAR field tuning
   ○ FHSS classifier
-  ○ Bearing estimation
+  ○ Bearing estimation (AoA)
 
 [PHASE 3: TRACKING]
   ○ Kalman tracker
