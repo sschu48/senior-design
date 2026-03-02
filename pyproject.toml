@@ -15,6 +15,12 @@ dev = [
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
 ]
+hardware = [
+    "pyserial>=3.5",
+]
+# NOTE: UHD Python bindings (import uhd) come from the system package python3-uhd,
+# not PyPI. The venv MUST be created with --system-site-packages to access them.
+# On Ubuntu: sudo apt install python3-uhd
 
 [build-system]
 requires = ["setuptools>=68.0"]
