@@ -1,0 +1,111 @@
+# SENTINEL Configuration
+# All hardware parameters and system settings. No hardcoded values in code.
+
+system:
+  name: "SENTINEL"
+  version: "0.1.0"
+  log_level: "INFO"                      # DEBUG, INFO, WARNING, ERROR
+  log_format: "json"                     # json or text
+  log_file: "logs/sentinel.jsonl"
+
+sdr:
+  device: "b210"                         # b210, hackrf, rtlsdr
+  driver: "uhd"                          # uhd or soapy
+
+  rx_a:                                  # Omni tripwire channel
+    antenna: "RX2"                       # B210 antenna port
+    center_freq_hz: 2.437e9              # WiFi Ch 6 — RemoteID default
+    sample_rate_hz: 30.72e6              # MIMO max per channel
+    bandwidth_hz: 30.72e6
+    gain_db: 40                          # RX gain (0-76 dB on B210)
+    agc: false
+
+  rx_b:                                  # Yagi directional channel
+    antenna: "TX/RX"                     # B210 antenna port
+    center_freq_hz: 2.437e9
+    sample_rate_hz: 30.72e6
+    bandwidth_hz: 30.72e6
+    gain_db: 40
+    agc: false
+
+dsp:
+  fft_size: 2048                         # FFT points for PSD
+  window: "hann"                         # hann, hamming, blackman
+  overlap: 0.5                           # 50% overlap for Welch
+  dc_offset_window: 1024                 # samples for DC removal
+
+  tripwire:                              # Omni energy detector
+    threshold_db: 10                     # above adaptive noise floor
+    noise_floor_window_sec: 10           # rolling median window
+    min_trigger_duration_ms: 50          # reject transients
+
+  cfar:                                  # Yagi CFAR detector
+    type: "CA-CFAR"                      # CA-CFAR, OS-CFAR
+    guard_cells: 4
+    reference_cells: 16
+    threshold_factor_db: 10              # Pfa ≈ 1e-6
+    min_detection_bw_hz: 100e3           # reject sub-100kHz detections
+
+  decoder:
+    remote_id:
+      enabled: true
+      channel: 6                         # WiFi channel for RID beacons
+    dji_droneid:
+      enabled: true
+      min_sample_rate_hz: 15.36e6        # minimum for DJI OFDM decode
+      sync_threshold: 0.7               # Zadoff-Chu correlation threshold
+
+antenna:
+  yagi:
+    # Active antenna depends on build phase:
+    #   Testing: PCB Yagi (ASIN B0BWM9X2HJ) — 12 dBi, ~45° beamwidth
+    #   Final:   L-com HG2415Y-RSP — 15 dBi, 30° beamwidth, VSWR < 1.5:1
+    gain_dbi: 12                         # PCB Yagi (testing); change to 15 for L-com
+    beamwidth_deg: 45                    # PCB Yagi (testing); change to 30 for L-com
+    polarization: "horizontal"
+    connector: "rp-sma"                  # both antennas use RP-SMA
+    max_input_power_w: 50                # L-com rated; PCB Yagi much lower
+
+  omni:
+    gain_dbi: 2
+    type: "vertical_dipole"
+
+  mount:
+    type: "servo"                        # servo or stepper
+    azimuth_min_deg: 0
+    azimuth_max_deg: 360
+    azimuth_speed_deg_per_sec: 30
+    elevation_enabled: false             # v1: fixed elevation
+    elevation_deg: 10                    # fixed tilt above horizon
+    control_interface: "serial"          # serial or gpio
+    serial_port: "/dev/ttyUSB0"
+    serial_baud: 115200
+
+scan:
+  default_mode: "SCAN"                   # SCAN, CUE, TRACK, IDLE
+  scan_speed_deg_per_sec: 30             # azimuth sweep rate
+  cue_timeout_sec: 5                     # return to SCAN if no detection
+  track_oscillation_deg: 15              # ±15° around peak bearing
+  track_lost_timeout_sec: 10             # return to SCAN after signal loss
+
+detection:
+  min_snr_db: 10                         # minimum SNR to report detection
+  min_confidence: 0.3                    # minimum classification confidence
+  bearing_exclusion_zones: []            # list of [start_deg, end_deg] to mask
+
+database:
+  type: "sqlite"
+  path: "data/sentinel.db"
+
+capture:
+  enabled: true                          # save raw IQ on detection
+  format: "cf32"                         # 32-bit float complex
+  pre_trigger_sec: 1.0                   # IQ buffered before trigger
+  post_trigger_sec: 3.0                  # IQ captured after trigger
+  output_dir: "data/samples"
+  sigmf_metadata: true                   # save SigMF sidecar files
+
+server:
+  host: "0.0.0.0"
+  port: 3000
+  websocket_path: "/ws"
