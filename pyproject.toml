@@ -33,3 +33,6 @@ include = ["src*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+markers = [
+    "hardware: requires USRP hardware connected",
+]

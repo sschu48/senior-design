@@ -169,32 +169,35 @@ else
 fi
 
 # Install udev rules for USB SDR devices
-UHD_RULES="/etc/udev/rules.d/uhd-usrp.rules"
-UHD_RULES_SRC="/usr/lib/uhd/utils/uhd-usrp.rules"
+# The uhd-host package installs rules to /usr/lib/udev/rules.d/ automatically.
+# We check for that first, then fall back to manual copy if needed.
+UHD_RULES_SYSTEM="/usr/lib/udev/rules.d/60-uhd-host.rules"
+UHD_RULES_LOCAL="/etc/udev/rules.d/uhd-usrp.rules"
 
-if [[ ! -f "$UHD_RULES" ]]; then
-    if [[ -f "$UHD_RULES_SRC" ]]; then
-        info "Installing UHD udev rules..."
-        sudo cp "$UHD_RULES_SRC" "$UHD_RULES"
+if [[ -f "$UHD_RULES_SYSTEM" ]] || [[ -f "$UHD_RULES_LOCAL" ]]; then
+    ok "UHD udev rules already installed."
+else
+    # Try to find and install rules manually
+    UHD_RULES_SRC=""
+    for candidate in \
+        /usr/lib/uhd/utils/uhd-usrp.rules \
+        /usr/share/uhd/utils/uhd-usrp.rules; do
+        if [[ -f "$candidate" ]]; then
+            UHD_RULES_SRC="$candidate"
+            break
+        fi
+    done
+
+    if [[ -n "$UHD_RULES_SRC" ]]; then
+        info "Installing UHD udev rules from $UHD_RULES_SRC..."
+        sudo cp "$UHD_RULES_SRC" "$UHD_RULES_LOCAL"
         sudo udevadm control --reload-rules
         sudo udevadm trigger
         SUMMARY+=("Installed UHD udev rules")
         ok "udev rules installed and reloaded."
     else
-        # Try alternative path (varies by Ubuntu version)
-        ALT_SRC="/usr/share/uhd/utils/uhd-usrp.rules"
-        if [[ -f "$ALT_SRC" ]]; then
-            sudo cp "$ALT_SRC" "$UHD_RULES"
-            sudo udevadm control --reload-rules
-            sudo udevadm trigger
-            SUMMARY+=("Installed UHD udev rules")
-            ok "udev rules installed and reloaded."
-        else
-            warn "UHD udev rules source not found. B210 may need manual permission setup."
-        fi
+        warn "UHD udev rules source not found. B210 may need manual permission setup."
     fi
-else
-    ok "UHD udev rules already installed."
 fi
 
 # ── 6. Serial access (dialout group) ─────────────────────────────────────────

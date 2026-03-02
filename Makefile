@@ -9,7 +9,7 @@ PYTEST := $(VENV)/bin/pytest
 
 .DEFAULT_GOAL := help
 
-.PHONY: help venv test test-quick run-radar spectrum setup clean clean-all
+.PHONY: help venv test test-quick test-hardware run-radar run-pipeline run-pipeline-headless run-live run-live-headless spectrum setup clean clean-all
 
 help: ## Show available targets
 	@echo "SENTINEL Development Commands"
@@ -28,11 +28,26 @@ $(VENV)/bin/activate:
 test: venv ## Run full test suite
 	$(PYTEST) -v
 
-test-quick: venv ## Run tests (no slow/field markers)
-	$(PYTEST) -v -m "not slow and not field"
+test-quick: venv ## Run tests (no slow/field/hardware markers)
+	$(PYTEST) -v -m "not slow and not field and not hardware"
 
 run-radar: ## Start Express+Socket.IO radar app
 	cd radar-app && npm start
+
+run-pipeline: venv ## Run detection pipeline (synthetic data)
+	$(PYTHON) -m tools.sentinel_runner --frames 100
+
+run-pipeline-headless: venv ## Run pipeline headless (no per-detection output)
+	$(PYTHON) -m tools.sentinel_runner --frames 100 --headless
+
+run-live: venv ## Run detection pipeline (live USRP B210)
+	$(PYTHON) -m tools.sentinel_runner --live --frames 100
+
+run-live-headless: venv ## Run live pipeline headless
+	$(PYTHON) -m tools.sentinel_runner --live --frames 100 --headless
+
+test-hardware: venv ## Run hardware-dependent tests (requires USRP)
+	$(PYTEST) -v -m hardware
 
 spectrum: venv ## Launch spectrum analyzer tool
 	$(PYTHON) -m src.ui.spectrum

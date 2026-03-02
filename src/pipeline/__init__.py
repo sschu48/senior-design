@@ -1,0 +1,1 @@
+# SENTINEL detection pipeline package
