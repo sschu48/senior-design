@@ -1,0 +1,37 @@
+graph TD
+    ROOT["SENTINEL\nPassive RF Drone Detection System"]
+
+    RF["RF Signal Reception"]
+    DSP["Signal Processing"]
+    DET["Detection & Classification"]
+    TRACK["Tracking & Control"]
+    UI["User Interface & Logging"]
+
+    ROOT --> RF
+    ROOT --> DSP
+    ROOT --> DET
+    ROOT --> TRACK
+    ROOT --> UI
+
+    RF --> RF1["Omnidirectional\nReception (RX-A)"]
+    RF --> RF2["Directional\nReception (RX-B)"]
+    RF --> RF3["RF Front End\nFiltering & Amplification"]
+    RF --> RF4["IQ Digitization\n(USRP B210 ADC)"]
+
+    DSP --> DSP1["DC Offset Removal"]
+    DSP --> DSP2["PSD Computation\n(Welch FFT)"]
+    DSP --> DSP3["Noise Floor\nEstimation"]
+
+    DET --> DET1["Energy Tripwire\n(Omni channel)"]
+    DET --> DET2["CA-CFAR Detection\n(Yagi channel)"]
+    DET --> DET3["Packet Decoding\n(RemoteID / DJI)"]
+    DET --> DET4["Protocol\nClassification"]
+
+    TRACK --> TRK1["Bearing Estimation\n(AoA via RSSI)"]
+    TRACK --> TRK2["Antenna Servo\nControl"]
+    TRACK --> TRK3["Scan Mode\nState Machine"]
+
+    UI --> UI1["PPI Radar Display"]
+    UI --> UI2["Spectrum Analyzer"]
+    UI --> UI3["Detection Logging\n(JSON + SQLite)"]
+    UI --> UI4["Alert System"]

@@ -1,0 +1,40 @@
+graph TB
+    subgraph ANTENNA["Antenna System"]
+        OMNI["Omni Dipole\n2.4 GHz\n2 dBi"]
+        YAGI["Yagi Directional\n2.4 GHz\n12 dBi"]
+        SERVO["Pan Servo\n0-360° Azimuth"]
+        YAGI --- SERVO
+    end
+
+    subgraph RF["RF Front End"]
+        BPF_A["BPF + LNA\n2.4 GHz\n~20 dB gain\n<1.5 dB NF"]
+        BPF_B["BPF + LNA\n2.4 GHz\n~20 dB gain\n<1.5 dB NF"]
+    end
+
+    subgraph SDR["USRP B210"]
+        RXA["RX-A (Omni)\n30.72 MSPS\n30 MHz BW"]
+        RXB["RX-B (Yagi)\n30.72 MSPS\n30 MHz BW"]
+    end
+
+    subgraph HOST["Host Computer"]
+        subgraph DSP["DSP Pipeline (Python)"]
+            OMNI_PATH["Omni Path:\nIQ → FFT → Energy Det\n→ Band Presence Alert"]
+            YAGI_PATH["Yagi Path:\nIQ → DC Remove → PSD\n→ CFAR → Feature Extract\n→ Pkt Decode → Bearing Est"]
+        end
+        TRACKER["Tracker / State Machine\nDetection → Track Init → Kalman Filter"]
+        DATA["Data Layer\nSQLite | Raw IQ | JSON Logs"]
+    end
+
+    subgraph UI["Radar App (Frontend)"]
+        PPI["PPI Radar Display"]
+        SPEC["Spectrum Waterfall"]
+        LOG["Detection Log / Alerts"]
+    end
+
+    OMNI --> BPF_A --> RXA --> OMNI_PATH
+    YAGI --> BPF_B --> RXB --> YAGI_PATH
+    OMNI_PATH --> TRACKER
+    YAGI_PATH --> TRACKER
+    TRACKER --> DATA
+    DATA -->|WebSocket| UI
+    TRACKER -->|Servo CMD| SERVO

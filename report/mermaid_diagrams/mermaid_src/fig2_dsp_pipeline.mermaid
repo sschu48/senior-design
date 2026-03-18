@@ -1,0 +1,27 @@
+graph TD
+    IQ["IQ Samples\n(complex64 from B210)"]
+    DC["DC Offset Removal\n(running mean subtraction)"]
+    PSD["PSD Estimation\n(Welch method, 2048-pt FFT, Hann window)"]
+
+    subgraph OMNI_PATH["Omni Channel (RX-A)"]
+        TRIP["Tripwire Detector\n(Adaptive EMA noise floor + 10 dB threshold)"]
+    end
+
+    subgraph YAGI_PATH["Yagi Channel (RX-B)"]
+        CFAR["CA-CFAR Detection\n(4 guard, 16 ref cells, adaptive threshold)"]
+        FEAT["Feature Extraction\n(BW, center freq, burst pattern, FHSS sig)"]
+        DECODE["Packet Decode\n(RemoteID / DJI DroneID)"]
+        CLASS["Classifier\n(Rule-based: protocol matching)"]
+        BEAR["Bearing Estimator\n(Peak RSSI at yagi azimuth)"]
+    end
+
+    DEDUP["Deduplication\n(Keep highest SNR per overlap)"]
+    ANT["Antenna Control Update\n(SCAN → CUE → TRACK)"]
+    LOG["Structured JSON Log\n(timestamp, bearing, SNR, confidence)"]
+
+    IQ --> DC --> PSD
+    PSD --> TRIP
+    PSD --> CFAR --> FEAT --> DECODE --> CLASS --> BEAR
+    TRIP --> DEDUP
+    BEAR --> DEDUP
+    DEDUP --> ANT --> LOG

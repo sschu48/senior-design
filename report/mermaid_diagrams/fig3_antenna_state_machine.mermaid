@@ -1,0 +1,34 @@
+stateDiagram-v2
+    [*] --> IDLE
+    IDLE --> SCAN : User Start
+    SCAN --> CUE : Omni Cue (energy spike)
+    SCAN --> TRACK : Yagi Detection (strong signal)
+    CUE --> TRACK : Yagi Detection (confirmed)
+    CUE --> SCAN : Timeout (5 sec, no confirm)
+    TRACK --> SCAN : Signal Lost (10 sec timeout)
+    SCAN --> IDLE : User Stop
+    CUE --> IDLE : User Stop
+    TRACK --> IDLE : User Stop
+
+    state IDLE {
+        [*] --> Parked
+        Parked : No motor activity
+        Parked : Both RX channels active
+    }
+    state SCAN {
+        [*] --> Sweeping
+        Sweeping : 360° azimuth sweep
+        Sweeping : 30°/sec scan rate
+        Sweeping : Full revolution ~12 sec
+    }
+    state CUE {
+        [*] --> Slewing
+        Slewing : Slew to energy bearing
+        Slewing : Yagi confirms or rejects
+    }
+    state TRACK {
+        [*] --> Oscillating
+        Oscillating : ±15° around peak bearing
+        Oscillating : Parabolic fit for AoA
+        Oscillating : Kalman filter smoothing
+    }

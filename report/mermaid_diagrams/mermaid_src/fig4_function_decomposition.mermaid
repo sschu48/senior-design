@@ -1,0 +1,41 @@
+graph LR
+    ROOT["SENTINEL<br/>Passive RF Drone<br/>Detection System"]
+
+    subgraph RF["RF Signal Reception"]
+        RF1["Omni Reception<br/>(RX-A)"]
+        RF2["Directional<br/>Reception (RX-B)"]
+        RF3["BPF + LNA<br/>Filtering"]
+        RF4["IQ Digitization<br/>(USRP B210)"]
+    end
+
+    subgraph DSP["Signal Processing"]
+        DSP1["DC Offset<br/>Removal"]
+        DSP2["PSD Computation<br/>(Welch FFT)"]
+        DSP3["Noise Floor<br/>Estimation"]
+    end
+
+    subgraph DET["Detection & Classification"]
+        DET1["Energy Tripwire<br/>(Omni)"]
+        DET2["CA-CFAR<br/>(Yagi)"]
+        DET3["Packet Decode<br/>(RID / DJI)"]
+        DET4["Protocol<br/>Classification"]
+    end
+
+    subgraph TRK["Tracking & Control"]
+        TRK1["Bearing Est.<br/>(AoA via RSSI)"]
+        TRK2["Servo Control"]
+        TRK3["Scan Mode<br/>State Machine"]
+    end
+
+    subgraph UI["User Interface & Logging"]
+        UI1["PPI Radar"]
+        UI2["Spectrum<br/>Analyzer"]
+        UI3["JSON + SQLite<br/>Logging"]
+        UI4["Alert System"]
+    end
+
+    ROOT --> RF
+    ROOT --> DSP
+    ROOT --> DET
+    ROOT --> TRK
+    ROOT --> UI

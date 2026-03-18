@@ -1,0 +1,33 @@
+gantt
+    title SENTINEL Project Timeline
+    dateFormat  YYYY-MM-DD
+    axisFormat  %b %Y
+
+    section Phase 1: Foundation
+    SDR capture pipeline          :done, p1a, 2025-09-01, 2025-10-15
+    PSD computation (Welch)       :done, p1b, 2025-10-01, 2025-10-31
+    Tripwire detector             :done, p1c, 2025-10-15, 2025-11-15
+    CA-CFAR detector              :done, p1d, 2025-11-01, 2025-12-01
+    Antenna control scaffold      :done, p1e, 2025-11-15, 2025-12-15
+    Config system                 :done, p1f, 2025-09-15, 2025-10-15
+    RemoteID decoder              :active, p1g, 2026-01-15, 2026-03-01
+    DJI DroneID decoder           :active, p1h, 2026-02-01, 2026-03-15
+    Radar app integration         :p1i, 2026-03-01, 2026-03-31
+
+    section Phase 2: Detection
+    CFAR field tuning             :p2a, 2026-03-15, 2026-04-15
+    FHSS classifier               :p2b, 2026-04-01, 2026-04-30
+    Bearing estimation (AoA)      :p2c, 2026-04-15, 2026-05-15
+
+    section Phase 3: Tracking
+    Kalman tracker                :p3a, 2026-05-01, 2026-05-31
+    Scan-Track handoff            :p3b, 2026-05-15, 2026-06-15
+
+    section Phase 4: Field Ops
+    Field-hardened UI             :p4a, 2026-06-01, 2026-06-30
+    Field testing & validation    :p4b, 2026-06-15, 2026-07-31
+
+    section Reports & Deliverables
+    Progress Report               :milestone, m1, 2026-03-18, 0d
+    Final Report                  :milestone, m2, 2026-05-01, 0d
+    Final Presentation            :milestone, m3, 2026-05-15, 0d
