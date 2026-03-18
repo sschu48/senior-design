@@ -20,39 +20,9 @@ import time
 
 from src.antenna.controller import SimulatedController
 from src.pipeline.engine import PipelineEngine
-from src.sdr.capture import SignalDef, SyntheticSource, USRPSource
+from src.sdr.capture import SyntheticSource, USRPSource
 from src.sdr.config import load_config
-
-
-# ---------------------------------------------------------------------------
-# Synthetic drone signals
-# ---------------------------------------------------------------------------
-
-# DJI OcuSync-like: wideband OFDM centered +5 MHz from center freq
-DJI_SIGNAL = SignalDef(
-    freq_offset_hz=5e6,
-    bandwidth_hz=10e6,
-    power_dbm=-55.0,
-    signal_type="wideband",
-    num_subcarriers=128,
-)
-
-# RC control link: narrow tone at -8 MHz
-RC_TONE = SignalDef(
-    freq_offset_hz=-8e6,
-    bandwidth_hz=0.0,
-    power_dbm=-60.0,
-    signal_type="tone",
-)
-
-# ELRS-like: narrow spread spectrum at +12 MHz
-ELRS_SIGNAL = SignalDef(
-    freq_offset_hz=12e6,
-    bandwidth_hz=500e3,
-    power_dbm=-65.0,
-    signal_type="wideband",
-    num_subcarriers=16,
-)
+from src.sdr.signals import DEFAULT_SIGNALS
 
 
 def build_source(config) -> SyntheticSource:
@@ -60,7 +30,7 @@ def build_source(config) -> SyntheticSource:
     return SyntheticSource(
         sample_rate_hz=config.sdr.rx_a.sample_rate_hz,
         noise_power_dbm=-90.0,
-        signals=[DJI_SIGNAL, RC_TONE, ELRS_SIGNAL],
+        signals=DEFAULT_SIGNALS,
         seed=42,
     )
 

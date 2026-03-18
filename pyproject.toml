@@ -36,4 +36,7 @@ testpaths = ["tests"]
 asyncio_mode = "auto"
 markers = [
     "hardware: requires USRP hardware connected",
+    "slow: slow-running tests",
+    "field: field test scripts",
 ]
+addopts = "-m 'not hardware'"

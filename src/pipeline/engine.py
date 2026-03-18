@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from src.antenna.controller import AntennaController, ScanMode
-from src.dsp.detector import CFARDetector, Detection, TripwireDetector
+from src.dsp.detector import Detection, create_detectors, deduplicate
 from src.dsp.spectrum import compute_psd, remove_dc_offset
 from src.sdr.capture import IQSource
 
@@ -55,39 +55,7 @@ class PipelineEngine:
 
     async def start(self) -> None:
         """Initialize detectors and start the source + antenna."""
-        cfg = self.config
-        dsp = cfg.dsp
-        rx = cfg.sdr.rx_a
-
-        # Tripwire detector (omni channel)
-        tw = dsp.tripwire
-        # frames_per_sec ≈ sample_rate / fft_size
-        frames_per_sec = rx.sample_rate_hz / dsp.fft_size
-        noise_floor_frames = max(2, int(tw.noise_floor_window_sec * frames_per_sec))
-        min_trigger_frames = max(1, int(
-            tw.min_trigger_duration_ms / 1000.0 * frames_per_sec
-        ))
-
-        self._tripwire = TripwireDetector(
-            threshold_db=tw.threshold_db,
-            noise_floor_frames=noise_floor_frames,
-            min_trigger_frames=min_trigger_frames,
-            sample_rate_hz=rx.sample_rate_hz,
-            center_freq_hz=rx.center_freq_hz,
-            fft_size=dsp.fft_size,
-        )
-
-        # CFAR detector (yagi channel)
-        cf = dsp.cfar
-        self._cfar = CFARDetector(
-            guard_cells=cf.guard_cells,
-            reference_cells=cf.reference_cells,
-            threshold_factor_db=cf.threshold_factor_db,
-            min_detection_bw_hz=cf.min_detection_bw_hz,
-            sample_rate_hz=rx.sample_rate_hz,
-            center_freq_hz=rx.center_freq_hz,
-            fft_size=dsp.fft_size,
-        )
+        self._tripwire, self._cfar = create_detectors(self.config)
 
         await self.source.start()
 
@@ -163,7 +131,7 @@ class PipelineEngine:
 
         # Deduplicate: if both detectors flag overlapping bins, keep the
         # one with higher SNR
-        all_detections = self._deduplicate(all_detections)
+        all_detections = deduplicate(all_detections)
 
         # Update antenna state
         now = time.monotonic()
@@ -197,27 +165,6 @@ class PipelineEngine:
                 break
             # Yield to event loop
             await asyncio.sleep(0)
-
-    def _deduplicate(self, detections: list[Detection]) -> list[Detection]:
-        """Remove overlapping detections, keeping the one with higher SNR."""
-        if len(detections) <= 1:
-            return detections
-
-        # Sort by SNR descending
-        detections.sort(key=lambda d: d.snr_db, reverse=True)
-        kept: list[Detection] = []
-
-        for d in detections:
-            overlaps = False
-            for k in kept:
-                # Check bin overlap
-                if d.bin_start <= k.bin_end and d.bin_end >= k.bin_start:
-                    overlaps = True
-                    break
-            if not overlaps:
-                kept.append(d)
-
-        return kept
 
     def _update_antenna(self, detections: list[Detection], dt: float) -> None:
         """Update antenna mode based on detections."""

@@ -24,7 +24,7 @@ Thumbs.db
 logs/
 *.log
 
-# Node (radar-app)
+# Node
 node_modules/
 
 # Database

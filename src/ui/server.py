@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from aiohttp import web
 
-from src.dsp.detector import CFARDetector, Detection, TripwireDetector
+from src.dsp.detector import Detection, create_detectors
 from src.dsp.spectrum import compute_psd_from_config
 
 if TYPE_CHECKING:
@@ -124,39 +124,8 @@ class DashboardServer:
         return ws
 
     def _init_detectors(self) -> None:
-        """Initialize tripwire + CFAR detectors (same as PipelineEngine.start)."""
-        cfg = self.config
-        dsp = cfg.dsp
-        rx = cfg.sdr.rx_a
-
-        frames_per_sec = rx.sample_rate_hz / dsp.fft_size
-
-        tw = dsp.tripwire
-        noise_floor_frames = max(2, int(tw.noise_floor_window_sec * frames_per_sec))
-        min_trigger_frames = max(1, int(
-            tw.min_trigger_duration_ms / 1000.0 * frames_per_sec
-        ))
-
-        self._tripwire = TripwireDetector(
-            threshold_db=tw.threshold_db,
-            noise_floor_frames=noise_floor_frames,
-            min_trigger_frames=min_trigger_frames,
-            sample_rate_hz=rx.sample_rate_hz,
-            center_freq_hz=rx.center_freq_hz,
-            fft_size=dsp.fft_size,
-        )
-
-        cf = dsp.cfar
-        self._cfar = CFARDetector(
-            guard_cells=cf.guard_cells,
-            reference_cells=cf.reference_cells,
-            threshold_factor_db=cf.threshold_factor_db,
-            min_detection_bw_hz=cf.min_detection_bw_hz,
-            sample_rate_hz=rx.sample_rate_hz,
-            center_freq_hz=rx.center_freq_hz,
-            fft_size=dsp.fft_size,
-        )
-
+        """Initialize tripwire + CFAR detectors from config."""
+        self._tripwire, self._cfar = create_detectors(self.config)
         self._detection_count = 0
         logger.info("Detection overlay enabled (tripwire + CFAR)")
 

@@ -48,35 +48,9 @@ import numpy as np  # noqa: E402
 from matplotlib.animation import FuncAnimation  # noqa: E402
 
 from src.dsp.spectrum import compute_psd_from_config
-from src.sdr.capture import IQSource, SignalDef, SyntheticSource, USRPSource
+from src.sdr.capture import IQSource, SyntheticSource, USRPSource
 from src.sdr.config import load_config
-
-# ---------------------------------------------------------------------------
-# Synthetic signal definitions (same as sentinel_runner)
-# ---------------------------------------------------------------------------
-
-DJI_SIGNAL = SignalDef(
-    freq_offset_hz=5e6,
-    bandwidth_hz=10e6,
-    power_dbm=-55.0,
-    signal_type="wideband",
-    num_subcarriers=128,
-)
-
-RC_TONE = SignalDef(
-    freq_offset_hz=-8e6,
-    bandwidth_hz=0.0,
-    power_dbm=-60.0,
-    signal_type="tone",
-)
-
-ELRS_SIGNAL = SignalDef(
-    freq_offset_hz=12e6,
-    bandwidth_hz=500e3,
-    power_dbm=-65.0,
-    signal_type="wideband",
-    num_subcarriers=16,
-)
+from src.sdr.signals import DEFAULT_SIGNALS
 
 
 # ---------------------------------------------------------------------------
@@ -254,7 +228,7 @@ def main() -> None:
         source = SyntheticSource(
             sample_rate_hz=config.sdr.rx_a.sample_rate_hz,
             noise_power_dbm=-90.0,
-            signals=[DJI_SIGNAL, RC_TONE, ELRS_SIGNAL],
+            signals=DEFAULT_SIGNALS,
             seed=42,
         )
         mode = "Synthetic"

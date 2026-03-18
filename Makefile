@@ -9,7 +9,7 @@ PYTEST := $(VENV)/bin/pytest
 
 .DEFAULT_GOAL := help
 
-.PHONY: help venv test test-quick test-hardware run-radar run-pipeline run-pipeline-headless run-live run-live-headless spectrum spectrum-live dashboard dashboard-live dashboard-detect dashboard-detect-live bench-test bench-test-live setup clean clean-all
+.PHONY: help venv test test-quick test-hardware run-pipeline run-pipeline-headless run-live run-live-headless spectrum spectrum-live dashboard dashboard-live dashboard-detect dashboard-detect-live bench-test bench-test-live setup clean clean-all
 
 help: ## Show available targets
 	@echo "SENTINEL Development Commands"
@@ -30,9 +30,6 @@ test: venv ## Run full test suite
 
 test-quick: venv ## Run tests (no slow/field/hardware markers)
 	$(PYTEST) -v -m "not slow and not field and not hardware"
-
-run-radar: ## Start Express+Socket.IO radar app
-	cd radar-app && npm start
 
 run-pipeline: venv ## Run detection pipeline (synthetic data)
 	$(PYTHON) -m tools.sentinel_runner --frames 100
@@ -82,6 +79,5 @@ clean: ## Remove Python cache and build artifacts
 	find . -type f -name "*.pyc" -delete 2>/dev/null || true
 	rm -rf .pytest_cache build dist
 
-clean-all: clean ## Remove venv and node_modules too
+clean-all: clean ## Remove venv too
 	rm -rf $(VENV)
-	rm -rf radar-app/node_modules

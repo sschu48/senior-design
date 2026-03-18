@@ -30,10 +30,11 @@ from pathlib import Path
 
 import numpy as np
 
-from src.dsp.detector import CFARDetector, Detection, TripwireDetector
+from src.dsp.detector import Detection, create_detectors, deduplicate
 from src.dsp.spectrum import compute_psd, remove_dc_offset
-from src.sdr.capture import IQSource, SignalDef, SyntheticSource, USRPSource
+from src.sdr.capture import IQSource, SyntheticSource, USRPSource
 from src.sdr.config import SentinelConfig, load_config
+from src.sdr.signals import DEFAULT_SIGNALS
 
 logger = logging.getLogger("sentinel.bench")
 
@@ -57,34 +58,6 @@ WIFI_CHANNEL_FREQ_HZ: dict[int, float] = {
     13: 2.472e9,
     14: 2.484e9,
 }
-
-# ---------------------------------------------------------------------------
-# Synthetic test signals (same as sentinel_runner.py)
-# ---------------------------------------------------------------------------
-
-DJI_SIGNAL = SignalDef(
-    freq_offset_hz=5e6,
-    bandwidth_hz=10e6,
-    power_dbm=-55.0,
-    signal_type="wideband",
-    num_subcarriers=128,
-)
-
-RC_TONE = SignalDef(
-    freq_offset_hz=-8e6,
-    bandwidth_hz=0.0,
-    power_dbm=-60.0,
-    signal_type="tone",
-)
-
-ELRS_SIGNAL = SignalDef(
-    freq_offset_hz=12e6,
-    bandwidth_hz=500e3,
-    power_dbm=-65.0,
-    signal_type="wideband",
-    num_subcarriers=16,
-)
-
 
 # ---------------------------------------------------------------------------
 # Config override helpers
@@ -325,34 +298,8 @@ async def run_bench_test(
     rx = config.sdr.rx_a
     dsp = config.dsp
 
-    # --- Detector init (same as PipelineEngine.start(), engine.py:56-90) ---
+    tripwire, cfar = create_detectors(config)
     frames_per_sec = rx.sample_rate_hz / dsp.fft_size
-
-    tw_cfg = dsp.tripwire
-    noise_floor_frames = max(2, int(tw_cfg.noise_floor_window_sec * frames_per_sec))
-    min_trigger_frames = max(1, int(
-        tw_cfg.min_trigger_duration_ms / 1000.0 * frames_per_sec
-    ))
-
-    tripwire = TripwireDetector(
-        threshold_db=tw_cfg.threshold_db,
-        noise_floor_frames=noise_floor_frames,
-        min_trigger_frames=min_trigger_frames,
-        sample_rate_hz=rx.sample_rate_hz,
-        center_freq_hz=rx.center_freq_hz,
-        fft_size=dsp.fft_size,
-    )
-
-    cfar_cfg = dsp.cfar
-    cfar = CFARDetector(
-        guard_cells=cfar_cfg.guard_cells,
-        reference_cells=cfar_cfg.reference_cells,
-        threshold_factor_db=cfar_cfg.threshold_factor_db,
-        min_detection_bw_hz=cfar_cfg.min_detection_bw_hz,
-        sample_rate_hz=rx.sample_rate_hz,
-        center_freq_hz=rx.center_freq_hz,
-        fft_size=dsp.fft_size,
-    )
 
     # --- Determine frame limits ---
     warmup_sec = args.warmup
@@ -381,8 +328,8 @@ async def run_bench_test(
     print(f"  Rate:       {rx.sample_rate_hz / 1e6:.2f} MSPS")
     print(f"  Gain:       {rx.gain_db:.1f} dB")
     print(f"  FFT:        {dsp.fft_size}")
-    print(f"  CFAR thr:   {cfar_cfg.threshold_factor_db:.1f} dB")
-    print(f"  Trip thr:   {tw_cfg.threshold_db:.1f} dB")
+    print(f"  CFAR thr:   {dsp.cfar.threshold_factor_db:.1f} dB")
+    print(f"  Trip thr:   {dsp.tripwire.threshold_db:.1f} dB")
     print(f"  Warmup:     {warmup_frames} frames ({warmup_sec}s)")
     print(f"  Collect:    {total_frames - warmup_frames} frames")
     print(f"  Save IQ:    {args.save_iq}")
@@ -416,7 +363,7 @@ async def run_bench_test(
 
                 all_dets = tw_dets + cfar_dets
                 # Deduplicate by SNR (same as PipelineEngine._deduplicate)
-                all_dets = _deduplicate(all_dets)
+                all_dets = deduplicate(all_dets)
 
                 for d in all_dets:
                     results.record_detection(d, frame_idx)
@@ -447,26 +394,6 @@ async def run_bench_test(
         report["frame_rate_fps"] = round(total_frames / elapsed, 1)
 
     return report
-
-
-def _deduplicate(detections: list[Detection]) -> list[Detection]:
-    """Remove overlapping detections, keeping higher SNR."""
-    if len(detections) <= 1:
-        return detections
-
-    detections.sort(key=lambda d: d.snr_db, reverse=True)
-    kept: list[Detection] = []
-
-    for d in detections:
-        overlaps = False
-        for k in kept:
-            if d.bin_start <= k.bin_end and d.bin_end >= k.bin_start:
-                overlaps = True
-                break
-        if not overlaps:
-            kept.append(d)
-
-    return kept
 
 
 # ---------------------------------------------------------------------------
@@ -549,7 +476,7 @@ def main() -> None:
         source = SyntheticSource(
             sample_rate_hz=config.sdr.rx_a.sample_rate_hz,
             noise_power_dbm=-90.0,
-            signals=[DJI_SIGNAL, RC_TONE, ELRS_SIGNAL],
+            signals=DEFAULT_SIGNALS,
             seed=42,
         )
 

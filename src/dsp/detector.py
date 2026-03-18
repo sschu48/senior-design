@@ -3,13 +3,20 @@
 Provides TripwireDetector (energy-based) and CFARDetector (CA-CFAR) that
 consume PSD frames and emit Detection objects when signals exceed the
 adaptive noise floor.
+
+Also provides ``create_detectors()`` factory and ``deduplicate()`` helper
+used by the pipeline engine, dashboard server, and bench test.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from src.sdr.config import SentinelConfig
 
 
 # ---------------------------------------------------------------------------
@@ -355,3 +362,68 @@ class CFARDetector:
             )
 
         return detections
+
+
+# ---------------------------------------------------------------------------
+# Shared helpers
+# ---------------------------------------------------------------------------
+
+def deduplicate(detections: list[Detection]) -> list[Detection]:
+    """Remove overlapping detections, keeping the one with higher SNR."""
+    if len(detections) <= 1:
+        return detections
+
+    detections.sort(key=lambda d: d.snr_db, reverse=True)
+    kept: list[Detection] = []
+
+    for d in detections:
+        overlaps = False
+        for k in kept:
+            if d.bin_start <= k.bin_end and d.bin_end >= k.bin_start:
+                overlaps = True
+                break
+        if not overlaps:
+            kept.append(d)
+
+    return kept
+
+
+def create_detectors(
+    config: SentinelConfig,
+) -> tuple[TripwireDetector, CFARDetector]:
+    """Build TripwireDetector + CFARDetector from config.
+
+    Centralizes the detector construction that was previously duplicated
+    across the pipeline engine, dashboard server, and bench test.
+    """
+    dsp = config.dsp
+    rx = config.sdr.rx_a
+    frames_per_sec = rx.sample_rate_hz / dsp.fft_size
+
+    tw = dsp.tripwire
+    noise_floor_frames = max(2, int(tw.noise_floor_window_sec * frames_per_sec))
+    min_trigger_frames = max(1, int(
+        tw.min_trigger_duration_ms / 1000.0 * frames_per_sec
+    ))
+
+    tripwire = TripwireDetector(
+        threshold_db=tw.threshold_db,
+        noise_floor_frames=noise_floor_frames,
+        min_trigger_frames=min_trigger_frames,
+        sample_rate_hz=rx.sample_rate_hz,
+        center_freq_hz=rx.center_freq_hz,
+        fft_size=dsp.fft_size,
+    )
+
+    cf = dsp.cfar
+    cfar = CFARDetector(
+        guard_cells=cf.guard_cells,
+        reference_cells=cf.reference_cells,
+        threshold_factor_db=cf.threshold_factor_db,
+        min_detection_bw_hz=cf.min_detection_bw_hz,
+        sample_rate_hz=rx.sample_rate_hz,
+        center_freq_hz=rx.center_freq_hz,
+        fft_size=dsp.fft_size,
+    )
+
+    return tripwire, cfar

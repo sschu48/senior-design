@@ -129,25 +129,7 @@ info "Installing Python dependencies..."
 ok "Python deps installed."
 SUMMARY+=("Installed Python deps: sentinel[dev,hardware]")
 
-# ── 4. Radar app (Node) ──────────────────────────────────────────────────────
-
-step "Radar app (Express + Socket.IO)"
-
-if [[ -d "radar-app" ]]; then
-    cd radar-app
-    if [[ ! -d "node_modules" ]]; then
-        info "Installing npm dependencies..."
-        npm install --silent
-        SUMMARY+=("Installed radar-app npm dependencies")
-    else
-        ok "node_modules already exists. Run 'cd radar-app && npm install' to update."
-    fi
-    cd "$REPO_ROOT"
-else
-    warn "radar-app/ directory not found. Skipping npm install."
-fi
-
-# ── 5. UHD setup (B210 FPGA images + udev) ───────────────────────────────────
+# ── 4. UHD setup (B210 FPGA images + udev) ───────────────────────────────────
 
 step "UHD / B210 setup"
 
@@ -200,7 +182,7 @@ else
     fi
 fi
 
-# ── 6. Serial access (dialout group) ─────────────────────────────────────────
+# ── 5. Serial access (dialout group) ─────────────────────────────────────────
 
 step "Serial port access"
 
@@ -213,7 +195,7 @@ else
     warn "You must log out and back in for group change to take effect."
 fi
 
-# ── 7. Project directories ───────────────────────────────────────────────────
+# ── 6. Project directories ───────────────────────────────────────────────────
 
 step "Project directories"
 
@@ -232,7 +214,7 @@ for d in "${DIRS[@]}"; do
 done
 ok "All project directories exist."
 
-# ── 8. Verification ──────────────────────────────────────────────────────────
+# ── 7. Verification ──────────────────────────────────────────────────────────
 
 step "Verification"
 
@@ -282,7 +264,7 @@ echo ""
 info "${BOLD}Next steps:${NC}"
 echo "  1. Activate the venv:  source .venv/bin/activate"
 echo "  2. Run tests:          make test"
-echo "  3. Start radar app:    make run-radar"
+echo "  3. Start dashboard:    make dashboard"
 echo "  4. Connect B210 and:   uhd_usrp_probe"
 echo ""
 

@@ -12,9 +12,8 @@ from tools.bench_test import (
     BenchResults,
     apply_cli_overrides,
     compute_report,
-    _deduplicate,
 )
-from src.dsp.detector import Detection
+from src.dsp.detector import Detection, deduplicate
 
 
 # ---------------------------------------------------------------------------
@@ -250,19 +249,19 @@ class TestDeduplicate:
     def test_no_overlap(self):
         d1 = Detection(freq_hz=2.43e9, bandwidth_hz=1e6, power_dbm=-55, snr_db=20, bin_start=100, bin_end=150)
         d2 = Detection(freq_hz=2.45e9, bandwidth_hz=1e6, power_dbm=-60, snr_db=15, bin_start=300, bin_end=350)
-        result = _deduplicate([d1, d2])
+        result = deduplicate([d1, d2])
         assert len(result) == 2
 
     def test_overlap_keeps_higher_snr(self):
         d1 = Detection(freq_hz=2.44e9, bandwidth_hz=5e6, power_dbm=-55, snr_db=20, bin_start=100, bin_end=200)
         d2 = Detection(freq_hz=2.44e9, bandwidth_hz=5e6, power_dbm=-50, snr_db=25, bin_start=120, bin_end=220)
-        result = _deduplicate([d1, d2])
+        result = deduplicate([d1, d2])
         assert len(result) == 1
         assert result[0].snr_db == 25
 
     def test_empty_list(self):
-        assert _deduplicate([]) == []
+        assert deduplicate([]) == []
 
     def test_single_detection(self):
         d = Detection(freq_hz=2.44e9, bandwidth_hz=1e6, power_dbm=-55, snr_db=20, bin_start=100, bin_end=150)
-        assert _deduplicate([d]) == [d]
+        assert deduplicate([d]) == [d]
