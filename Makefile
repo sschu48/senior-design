@@ -9,7 +9,7 @@ PYTEST := $(VENV)/bin/pytest
 
 .DEFAULT_GOAL := help
 
-.PHONY: help venv test test-quick test-hardware run-radar run-pipeline run-pipeline-headless run-live run-live-headless spectrum spectrum-live setup clean clean-all
+.PHONY: help venv test test-quick test-hardware run-radar run-pipeline run-pipeline-headless run-live run-live-headless spectrum spectrum-live dashboard dashboard-live dashboard-detect dashboard-detect-live bench-test bench-test-live setup clean clean-all
 
 help: ## Show available targets
 	@echo "SENTINEL Development Commands"
@@ -54,6 +54,24 @@ spectrum: venv ## Launch spectrum analyzer (synthetic signals)
 
 spectrum-live: venv ## Launch spectrum analyzer (live USRP B210)
 	$(PYTHON) -m src.ui.spectrum --live
+
+dashboard: venv ## Launch web dashboard (synthetic signals)
+	$(PYTHON) -m src.ui.dashboard
+
+dashboard-live: venv ## Launch web dashboard (live USRP B210)
+	$(PYTHON) -m src.ui.dashboard --live
+
+dashboard-detect: venv ## Dashboard with detection overlay (synthetic)
+	$(PYTHON) -m src.ui.dashboard --detect
+
+dashboard-detect-live: venv ## Dashboard with detection overlay + USRP
+	$(PYTHON) -m src.ui.dashboard --live --detect
+
+bench-test: venv ## Bench test (synthetic baseline)
+	$(PYTHON) -m tools.bench_test
+
+bench-test-live: venv ## Bench test with USRP (gain=25, indoor safe)
+	$(PYTHON) -m tools.bench_test --live --gain 25
 
 setup: ## Run Ubuntu setup script
 	bash scripts/setup-ubuntu.sh

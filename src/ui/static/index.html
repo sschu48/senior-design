@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SENTINEL — Spectrum Analyzer</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    background: #0a0a0f;
+    color: #00ff88;
+    font-family: 'Courier New', monospace;
+    overflow: hidden;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  #header {
+    padding: 10px 20px;
+    font-size: 14px;
+    border-bottom: 1px solid #1a3a2a;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  #header .title {
+    font-size: 16px;
+    font-weight: bold;
+    letter-spacing: 2px;
+  }
+
+  #header .config-info {
+    color: #668877;
+    font-size: 12px;
+  }
+
+  #canvas-container {
+    flex: 1;
+    position: relative;
+    min-height: 0;
+  }
+
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  #status-bar {
+    padding: 8px 20px;
+    font-size: 12px;
+    border-top: 1px solid #1a3a2a;
+    display: flex;
+    gap: 24px;
+    align-items: center;
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+
+  .status-item {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+
+  .status-label {
+    color: #445544;
+  }
+
+  .status-value {
+    color: #00ff88;
+  }
+
+  #connection-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #ff4444;
+    transition: background 0.3s;
+  }
+
+  #connection-dot.connected {
+    background: #00ff88;
+    box-shadow: 0 0 6px #00ff8866;
+  }
+</style>
+</head>
+<body>
+
+<div id="header">
+  <span class="title">SENTINEL &mdash; Spectrum Analyzer</span>
+  <span id="config-info" class="config-info">Connecting...</span>
+</div>
+
+<div id="canvas-container">
+  <canvas id="spectrum"></canvas>
+</div>
+
+<div id="status-bar">
+  <div class="status-item">
+    <div id="connection-dot"></div>
+    <span id="conn-status" class="status-value">Disconnected</span>
+  </div>
+  <div class="status-item">
+    <span class="status-label">Peak:</span>
+    <span id="peak-info" class="status-value">--</span>
+  </div>
+  <div class="status-item">
+    <span class="status-label">Noise Floor:</span>
+    <span id="noise-info" class="status-value">--</span>
+  </div>
+  <div class="status-item">
+    <span class="status-label">Frame:</span>
+    <span id="frame-info" class="status-value">0</span>
+  </div>
+  <div class="status-item">
+    <span class="status-label">FPS:</span>
+    <span id="fps-info" class="status-value">--</span>
+  </div>
+  <div class="status-item">
+    <span class="status-label">Detections:</span>
+    <span id="det-info" class="status-value">0</span>
+  </div>
+</div>
+
+<script>
+(function() {
+  "use strict";
+
+  // --- State ---
+  const canvas = document.getElementById("spectrum");
+  const ctx = canvas.getContext("2d");
+
+  let freqMhz = null;      // frequency axis from server (set once)
+  let powerDbm = null;      // latest PSD frame
+  let peakFreqMhz = 0;
+  let peakPowerDbm = -100;
+  let noiseFloorDbm = -90;
+  let frameCount = 0;
+  let detections = [];       // current frame detections
+  let detectionCount = 0;    // cumulative detection count
+  let ws = null;
+
+  // FPS measurement
+  let fpsFrames = 0;
+  let fpsLastTime = performance.now();
+  let currentFps = 0;
+
+  // Plot range
+  const DB_MIN = -100;
+  const DB_MAX = -20;
+  const MARGIN = { top: 20, right: 20, bottom: 40, left: 60 };
+
+  // --- DOM refs ---
+  const configInfoEl = document.getElementById("config-info");
+  const connDot = document.getElementById("connection-dot");
+  const connStatus = document.getElementById("conn-status");
+  const peakInfoEl = document.getElementById("peak-info");
+  const noiseInfoEl = document.getElementById("noise-info");
+  const frameInfoEl = document.getElementById("frame-info");
+  const fpsInfoEl = document.getElementById("fps-info");
+  const detInfoEl = document.getElementById("det-info");
+
+  // --- HiDPI canvas setup ---
+  function resizeCanvas() {
+    const container = canvas.parentElement;
+    const dpr = window.devicePixelRatio || 1;
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
+    canvas.style.width = w + "px";
+    canvas.style.height = h + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  window.addEventListener("resize", resizeCanvas);
+  resizeCanvas();
+
+  // --- Drawing ---
+  function drawSpectrum() {
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    const plotW = w - MARGIN.left - MARGIN.right;
+    const plotH = h - MARGIN.top - MARGIN.bottom;
+
+    // Clear
+    ctx.fillStyle = "#0a0a0f";
+    ctx.fillRect(0, 0, w, h);
+
+    if (!freqMhz || !powerDbm) {
+      ctx.fillStyle = "#445544";
+      ctx.font = "14px 'Courier New', monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("Waiting for data...", w / 2, h / 2);
+      requestAnimationFrame(drawSpectrum);
+      return;
+    }
+
+    const freqMin = freqMhz[0];
+    const freqMax = freqMhz[freqMhz.length - 1];
+    const dbRange = DB_MAX - DB_MIN;
+
+    // Helper: data → pixel
+    function xPx(freq) {
+      return MARGIN.left + ((freq - freqMin) / (freqMax - freqMin)) * plotW;
+    }
+    function yPx(db) {
+      return MARGIN.top + (1 - (db - DB_MIN) / dbRange) * plotH;
+    }
+
+    // --- Grid lines ---
+    ctx.strokeStyle = "#1a2a1f";
+    ctx.lineWidth = 0.5;
+
+    // Horizontal: every 10 dB
+    ctx.font = "10px 'Courier New', monospace";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    for (let db = DB_MIN; db <= DB_MAX; db += 10) {
+      const y = yPx(db);
+      ctx.beginPath();
+      ctx.moveTo(MARGIN.left, y);
+      ctx.lineTo(w - MARGIN.right, y);
+      ctx.stroke();
+      ctx.fillStyle = "#445544";
+      ctx.fillText(db + " dBm", MARGIN.left - 6, y);
+    }
+
+    // Vertical: every 5 MHz
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    const freqStart = Math.ceil(freqMin / 5) * 5;
+    for (let freq = freqStart; freq <= freqMax; freq += 5) {
+      const x = xPx(freq);
+      ctx.beginPath();
+      ctx.moveTo(x, MARGIN.top);
+      ctx.lineTo(x, h - MARGIN.bottom);
+      ctx.stroke();
+      ctx.fillStyle = "#445544";
+      ctx.fillText(freq.toFixed(0), x, h - MARGIN.bottom + 6);
+    }
+
+    // --- Axis labels ---
+    ctx.fillStyle = "#668877";
+    ctx.font = "12px 'Courier New', monospace";
+    ctx.textAlign = "center";
+    ctx.fillText("Frequency (MHz)", MARGIN.left + plotW / 2, h - 4);
+
+    ctx.save();
+    ctx.translate(12, MARGIN.top + plotH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText("Power (dBm)", 0, 0);
+    ctx.restore();
+
+    // --- Noise floor line ---
+    if (noiseFloorDbm > DB_MIN && noiseFloorDbm < DB_MAX) {
+      const nfY = yPx(noiseFloorDbm);
+      ctx.strokeStyle = "#444444";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([6, 4]);
+      ctx.beginPath();
+      ctx.moveTo(MARGIN.left, nfY);
+      ctx.lineTo(w - MARGIN.right, nfY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      ctx.fillStyle = "#555555";
+      ctx.font = "10px 'Courier New', monospace";
+      ctx.textAlign = "left";
+      ctx.fillText("NF " + noiseFloorDbm.toFixed(1), w - MARGIN.right + 4, nfY + 3);
+    }
+
+    // --- PSD trace ---
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(MARGIN.left, MARGIN.top, plotW, plotH);
+    ctx.clip();
+
+    // Glow effect
+    ctx.shadowColor = "#00ff8844";
+    ctx.shadowBlur = 4;
+    ctx.strokeStyle = "#00ff88";
+    ctx.lineWidth = 1.5;
+
+    ctx.beginPath();
+    const step = Math.max(1, Math.floor(powerDbm.length / plotW));
+    for (let i = 0; i < powerDbm.length; i += step) {
+      const x = xPx(freqMhz[i]);
+      const y = yPx(powerDbm[i]);
+      if (i === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.restore();
+
+    // --- Detection markers ---
+    if (detections.length > 0) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(MARGIN.left, MARGIN.top, plotW, plotH);
+      ctx.clip();
+
+      for (var di = 0; di < detections.length; di++) {
+        var det = detections[di];
+        var detFreqMin = det.freq_mhz - det.bandwidth_mhz / 2;
+        var detFreqMax = det.freq_mhz + det.bandwidth_mhz / 2;
+        var dxLeft = xPx(detFreqMin);
+        var dxRight = xPx(detFreqMax);
+        var dxCenter = xPx(det.freq_mhz);
+
+        // Red highlighted band
+        ctx.fillStyle = "rgba(255, 60, 60, 0.15)";
+        ctx.fillRect(dxLeft, MARGIN.top, dxRight - dxLeft, plotH);
+
+        // Band edges
+        ctx.strokeStyle = "rgba(255, 60, 60, 0.5)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(dxLeft, MARGIN.top);
+        ctx.lineTo(dxLeft, MARGIN.top + plotH);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(dxRight, MARGIN.top);
+        ctx.lineTo(dxRight, MARGIN.top + plotH);
+        ctx.stroke();
+
+        // Dashed center line
+        ctx.strokeStyle = "#ff3c3c";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.moveTo(dxCenter, MARGIN.top);
+        ctx.lineTo(dxCenter, MARGIN.top + plotH);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        // Freq + SNR label
+        ctx.fillStyle = "#ff6666";
+        ctx.font = "10px 'Courier New', monospace";
+        ctx.textAlign = "center";
+        ctx.fillText(
+          det.freq_mhz.toFixed(2) + " MHz",
+          dxCenter, MARGIN.top + 14 + di * 24
+        );
+        ctx.fillText(
+          "SNR " + det.snr_db.toFixed(1) + " dB",
+          dxCenter, MARGIN.top + 24 + di * 24
+        );
+      }
+      ctx.restore();
+    }
+
+    // --- Peak marker ---
+    if (peakPowerDbm > DB_MIN) {
+      const px = xPx(peakFreqMhz);
+      const py = yPx(peakPowerDbm);
+
+      // Triangle marker
+      ctx.fillStyle = "#ffcc00";
+      ctx.shadowColor = "#ffcc0066";
+      ctx.shadowBlur = 6;
+      ctx.beginPath();
+      ctx.moveTo(px, py - 8);
+      ctx.lineTo(px - 5, py - 2);
+      ctx.lineTo(px + 5, py - 2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowBlur = 0;
+
+      // Label
+      ctx.fillStyle = "#ffcc00";
+      ctx.font = "10px 'Courier New', monospace";
+      ctx.textAlign = "center";
+      ctx.fillText(
+        peakFreqMhz.toFixed(2) + " MHz",
+        px, py - 12
+      );
+      ctx.fillText(
+        peakPowerDbm.toFixed(1) + " dBm",
+        px, py - 22
+      );
+    }
+
+    // --- Plot border ---
+    ctx.strokeStyle = "#2a4a3a";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(MARGIN.left, MARGIN.top, plotW, plotH);
+
+    // --- FPS counter ---
+    fpsFrames++;
+    const now = performance.now();
+    if (now - fpsLastTime >= 1000) {
+      currentFps = fpsFrames;
+      fpsFrames = 0;
+      fpsLastTime = now;
+      fpsInfoEl.textContent = currentFps;
+    }
+
+    requestAnimationFrame(drawSpectrum);
+  }
+
+  // Start render loop
+  requestAnimationFrame(drawSpectrum);
+
+  // --- WebSocket ---
+  function connect() {
+    const proto = location.protocol === "https:" ? "wss:" : "ws:";
+    ws = new WebSocket(proto + "//" + location.host + "/ws");
+
+    ws.onopen = function() {
+      connDot.classList.add("connected");
+      connStatus.textContent = "Connected";
+    };
+
+    ws.onclose = function() {
+      connDot.classList.remove("connected");
+      connStatus.textContent = "Reconnecting...";
+      freqMhz = null;
+      powerDbm = null;
+      setTimeout(connect, 2000);
+    };
+
+    ws.onerror = function() {
+      ws.close();
+    };
+
+    ws.onmessage = function(evt) {
+      const msg = JSON.parse(evt.data);
+
+      if (msg.type === "config") {
+        freqMhz = msg.freq_mhz;
+        configInfoEl.textContent =
+          "Center: " + msg.center_mhz.toFixed(1) + " MHz | " +
+          "Rate: " + msg.rate_msps.toFixed(2) + " MSPS | " +
+          "FFT: " + msg.fft_size;
+      }
+      else if (msg.type === "psd") {
+        powerDbm = msg.power_dbm;
+        peakFreqMhz = msg.peak_freq_mhz;
+        peakPowerDbm = msg.peak_power_dbm;
+        noiseFloorDbm = msg.noise_floor_dbm;
+        frameCount = msg.frame;
+
+        // Update detections
+        detections = msg.detections || [];
+        if (msg.detection_count !== undefined) {
+          detectionCount = msg.detection_count;
+        }
+
+        // Update status bar
+        peakInfoEl.textContent =
+          peakFreqMhz.toFixed(2) + " MHz @ " + peakPowerDbm.toFixed(1) + " dBm";
+        noiseInfoEl.textContent = noiseFloorDbm.toFixed(1) + " dBm";
+        frameInfoEl.textContent = frameCount;
+        detInfoEl.textContent = detectionCount;
+      }
+    };
+  }
+
+  connect();
+})();
+</script>
+</body>
+</html>
