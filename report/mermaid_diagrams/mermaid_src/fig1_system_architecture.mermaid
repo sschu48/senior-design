@@ -1,9 +1,15 @@
 graph TB
     subgraph ANTENNA["Antenna System"]
-        OMNI["Omni Dipole\n2.4 GHz\n2 dBi"]
-        YAGI["Yagi Directional\n2.4 GHz\n12 dBi"]
-        SERVO["Pan Servo\n0-360° Azimuth"]
-        YAGI --- SERVO
+        OMNI["Omni Dipole\n2.4 GHz | 2 dBi\n360° Coverage"]
+        YAGI["Yagi Directional\n2.4 GHz | 12 dBi\n~35° Beamwidth"]
+    end
+
+    subgraph MOTION["Motion Control System"]
+        SPS["SPS-500 Positioner\n(Honeywell)\nAz: 0-360° continuous\nEl: -15° to +90°\nResolution: 0.01°"]
+        RS422["RS-422 Interface\n115200 bps\nCRC-8 Checksums"]
+        ENCODER["Encoder Feedback\nReal-time Position\n(Az + El)"]
+        YAGI --- SPS
+        SPS --- ENCODER
     end
 
     subgraph RF["RF Front End"]
@@ -11,17 +17,21 @@ graph TB
         BPF_B["BPF + LNA\n2.4 GHz\n~20 dB gain\n<1.5 dB NF"]
     end
 
-    subgraph SDR["USRP B210"]
+    subgraph SDR["USRP B210 (USB 3.0)"]
         RXA["RX-A (Omni)\n30.72 MSPS\n30 MHz BW"]
         RXB["RX-B (Yagi)\n30.72 MSPS\n30 MHz BW"]
     end
 
-    subgraph HOST["Host Computer"]
-        subgraph DSP["DSP Pipeline (Python)"]
-            OMNI_PATH["Omni Path:\nIQ → FFT → Energy Det\n→ Band Presence Alert"]
-            YAGI_PATH["Yagi Path:\nIQ → DC Remove → PSD\n→ CFAR → Feature Extract\n→ Pkt Decode → Bearing Est"]
+    subgraph HOST["Host Computer (Linux / Python)"]
+        subgraph DSP["DSP Pipeline (asyncio)"]
+            OMNI_PATH["Omni Path:\nIQ → FFT → Adaptive Energy Det\n→ Band Presence Alert"]
+            YAGI_PATH["Yagi Path:\nIQ → DC Remove → Welch PSD\n→ CA-CFAR → Feature Extract\n→ RemoteID / DroneID Decode"]
         end
-        TRACKER["Tracker / State Machine\nDetection → Track Init → Kalman Filter"]
+        subgraph CONTROL["Tracking & Control"]
+            RSSI["RSSI Computation\n1024-sample window"]
+            HILLCLIMB["Hill-Climbing Algorithm\nGradient: ΔR/Δθ\nV = Kp × ΔR/Δθ\nVmax = 10°/s"]
+            STATE["Antenna State Machine\nIdle → Scan → Cue → Track"]
+        end
         DATA["Data Layer\nSQLite | Raw IQ | JSON Logs"]
     end
 
@@ -33,8 +43,12 @@ graph TB
 
     OMNI --> BPF_A --> RXA --> OMNI_PATH
     YAGI --> BPF_B --> RXB --> YAGI_PATH
-    OMNI_PATH --> TRACKER
-    YAGI_PATH --> TRACKER
-    TRACKER --> DATA
+    OMNI_PATH --> STATE
+    YAGI_PATH --> RSSI
+    RSSI --> HILLCLIMB
+    HILLCLIMB --> STATE
+    STATE -->|"Velocity Cmds\n(RS-422)"| RS422
+    RS422 --> SPS
+    ENCODER -->|"Position\nFeedback"| STATE
+    STATE --> DATA
     DATA -->|WebSocket| UI
-    TRACKER -->|Servo CMD| SERVO
