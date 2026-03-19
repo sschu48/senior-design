@@ -1,0 +1,1222 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SENTINEL — Tactical RF Detection System</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Orbitron:wght@400;700;900&display=swap');
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  :root {
+    --green: #00ff88;
+    --green-dim: #00cc6a;
+    --green-dark: #004d28;
+    --green-glow: #00ff8844;
+    --red: #ff3c3c;
+    --red-dim: #cc2a2a;
+    --red-glow: #ff3c3c44;
+    --amber: #ffaa00;
+    --amber-dim: #cc8800;
+    --cyan: #00ddff;
+    --cyan-dim: #0099bb;
+    --bg: #0a0a0f;
+    --bg-panel: #0d1117;
+    --bg-panel2: #111820;
+    --border: #1a3a2a;
+    --border-bright: #2a5a3a;
+    --text-dim: #446655;
+    --text-muted: #334433;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--green);
+    font-family: 'Share Tech Mono', 'Courier New', monospace;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  /* ===== LAYOUT ===== */
+  #app {
+    display: grid;
+    grid-template-rows: 48px 1fr 32px;
+    grid-template-columns: 1fr;
+    height: 100vh;
+    width: 100vw;
+  }
+
+  /* --- HEADER --- */
+  #header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--border);
+    background: linear-gradient(180deg, #0f1a15 0%, var(--bg) 100%);
+    z-index: 10;
+  }
+
+  #header .logo {
+    font-family: 'Orbitron', monospace;
+    font-weight: 900;
+    font-size: 18px;
+    letter-spacing: 4px;
+    color: var(--green);
+    text-shadow: 0 0 12px var(--green-glow), 0 0 30px rgba(0, 255, 136, 0.15);
+  }
+
+  #header .logo .sub {
+    font-size: 10px;
+    font-weight: 400;
+    letter-spacing: 2px;
+    color: var(--text-dim);
+    margin-left: 12px;
+  }
+
+  #header .sys-time {
+    font-size: 14px;
+    color: var(--green-dim);
+    letter-spacing: 1px;
+  }
+
+  #header .sys-time .date {
+    color: var(--text-dim);
+    margin-right: 8px;
+    font-size: 12px;
+  }
+
+  /* --- MAIN CONTENT --- */
+  #main {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    grid-template-rows: 1fr 1fr;
+    gap: 2px;
+    padding: 2px;
+    min-height: 0;
+  }
+
+  /* --- PANEL BASE --- */
+  .panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 12px;
+    background: var(--bg-panel2);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+
+  .panel-header .label {
+    color: var(--text-dim);
+  }
+
+  .panel-header .badge {
+    font-size: 10px;
+    padding: 1px 8px;
+    border-radius: 2px;
+    font-weight: bold;
+    letter-spacing: 1px;
+  }
+
+  .badge-active {
+    background: rgba(0, 255, 136, 0.15);
+    color: var(--green);
+    border: 1px solid var(--green-dark);
+  }
+
+  .badge-warn {
+    background: rgba(255, 170, 0, 0.15);
+    color: var(--amber);
+    border: 1px solid #4d3300;
+  }
+
+  .badge-alert {
+    background: rgba(255, 60, 60, 0.15);
+    color: var(--red);
+    border: 1px solid #4d1111;
+    animation: badge-pulse 1s ease-in-out infinite;
+  }
+
+  @keyframes badge-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+
+  .panel-body {
+    flex: 1;
+    position: relative;
+    min-height: 0;
+  }
+
+  .panel-body canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  /* --- RADAR PANEL (top-left) --- */
+  #radar-panel {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  /* --- SPECTRUM PANEL (top-right) --- */
+  #spectrum-panel {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  /* --- WATERFALL PANEL (bottom-left) --- */
+  #waterfall-panel {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  /* --- THREAT TABLE (bottom-right) --- */
+  #threat-panel {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  /* Threat table styling */
+  .threat-table-wrapper {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px;
+    min-height: 0;
+  }
+
+  .threat-table-wrapper::-webkit-scrollbar {
+    width: 4px;
+  }
+  .threat-table-wrapper::-webkit-scrollbar-track {
+    background: var(--bg);
+  }
+  .threat-table-wrapper::-webkit-scrollbar-thumb {
+    background: var(--green-dark);
+    border-radius: 2px;
+  }
+
+  table.threats {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+  }
+
+  table.threats th {
+    text-align: left;
+    padding: 4px 8px;
+    color: var(--text-dim);
+    border-bottom: 1px solid var(--border);
+    font-weight: normal;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-size: 10px;
+    position: sticky;
+    top: 0;
+    background: var(--bg-panel);
+    z-index: 1;
+  }
+
+  table.threats td {
+    padding: 5px 8px;
+    border-bottom: 1px solid #0d1a14;
+    white-space: nowrap;
+  }
+
+  table.threats tr {
+    transition: background 0.3s;
+  }
+
+  table.threats tr.highlight {
+    background: rgba(255, 60, 60, 0.08);
+  }
+
+  table.threats tr:hover {
+    background: rgba(0, 255, 136, 0.05);
+  }
+
+  .threat-id { color: var(--cyan); }
+  .threat-type { color: var(--amber); }
+  .threat-freq { color: var(--green); }
+  .threat-bearing { color: var(--green-dim); }
+  .threat-range { color: var(--green-dim); }
+  .threat-snr { color: var(--amber); }
+
+  .threat-level-high {
+    color: var(--red);
+    font-weight: bold;
+    animation: badge-pulse 1.5s ease-in-out infinite;
+  }
+  .threat-level-med { color: var(--amber); }
+  .threat-level-low { color: var(--green-dim); }
+
+  /* --- SYSTEM STATUS OVERLAY --- */
+  .sys-status {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    display: flex;
+    gap: 16px;
+    padding: 4px 10px;
+    font-size: 10px;
+    background: rgba(10, 10, 15, 0.85);
+    border-top: 1px solid var(--border);
+  }
+
+  .sys-status .s-item {
+    display: flex;
+    gap: 4px;
+  }
+
+  .sys-status .s-label { color: var(--text-dim); }
+  .sys-status .s-val { color: var(--green); }
+
+  /* --- FOOTER --- */
+  #footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 16px;
+    border-top: 1px solid var(--border);
+    font-size: 10px;
+    background: var(--bg-panel2);
+  }
+
+  #footer .left { color: var(--text-dim); display: flex; gap: 20px; }
+  #footer .right { color: var(--text-dim); }
+
+  .footer-val { color: var(--green-dim); }
+
+  /* Scan line glow animation on radar */
+  @keyframes scan-glow {
+    0% { opacity: 0; }
+    50% { opacity: 1; }
+    100% { opacity: 0; }
+  }
+
+  /* Alert banner */
+  #alert-banner {
+    position: fixed;
+    top: 48px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 6px 32px;
+    background: rgba(255, 60, 60, 0.12);
+    border: 1px solid var(--red-dim);
+    color: var(--red);
+    font-size: 12px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    z-index: 100;
+    opacity: 0;
+    transition: opacity 0.5s;
+    pointer-events: none;
+    font-family: 'Orbitron', monospace;
+  }
+
+  #alert-banner.visible {
+    opacity: 1;
+  }
+</style>
+</head>
+<body>
+
+<div id="app">
+  <!-- HEADER -->
+  <div id="header">
+    <div class="logo">
+      SENTINEL
+      <span class="sub">PASSIVE RF DETECTION</span>
+    </div>
+    <div class="sys-time">
+      <span class="date" id="sys-date"></span>
+      <span id="sys-clock"></span>
+    </div>
+  </div>
+
+  <!-- MAIN GRID -->
+  <div id="main">
+    <!-- RADAR PPI -->
+    <div class="panel" id="radar-panel">
+      <div class="panel-header">
+        <span>Radar PPI</span>
+        <span class="label" id="scan-mode-label">SCANNING</span>
+        <span class="badge badge-active" id="scan-mode-badge">SCAN</span>
+      </div>
+      <div class="panel-body">
+        <canvas id="radar-canvas"></canvas>
+        <div class="sys-status">
+          <div class="s-item"><span class="s-label">AZ:</span><span class="s-val" id="az-val">000.0&deg;</span></div>
+          <div class="s-item"><span class="s-label">EL:</span><span class="s-val" id="el-val">010.0&deg;</span></div>
+          <div class="s-item"><span class="s-label">MODE:</span><span class="s-val" id="mode-val">SWEEP</span></div>
+          <div class="s-item"><span class="s-label">GAIN:</span><span class="s-val">42 dB</span></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SPECTRUM -->
+    <div class="panel" id="spectrum-panel">
+      <div class="panel-header">
+        <span>RF Spectrum</span>
+        <span class="label">2400 &mdash; 2500 MHz</span>
+        <span class="badge badge-active">LIVE</span>
+      </div>
+      <div class="panel-body">
+        <canvas id="spectrum-canvas"></canvas>
+      </div>
+    </div>
+
+    <!-- WATERFALL -->
+    <div class="panel" id="waterfall-panel">
+      <div class="panel-header">
+        <span>Waterfall</span>
+        <span class="label">Spectrogram</span>
+        <span class="badge badge-active">REC</span>
+      </div>
+      <div class="panel-body">
+        <canvas id="waterfall-canvas"></canvas>
+      </div>
+    </div>
+
+    <!-- THREAT TABLE -->
+    <div class="panel" id="threat-panel">
+      <div class="panel-header">
+        <span>Threat Board</span>
+        <span class="label" id="track-count">0 TRACKS</span>
+        <span class="badge badge-active" id="threat-badge">CLEAR</span>
+      </div>
+      <div class="threat-table-wrapper">
+        <table class="threats">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Type</th>
+              <th>Freq</th>
+              <th>BRG</th>
+              <th>Range</th>
+              <th>SNR</th>
+              <th>Threat</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody id="threat-body"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <div id="footer">
+    <div class="left">
+      <span>SDR: <span class="footer-val">USRP B210</span></span>
+      <span>RX-A: <span class="footer-val">OMNI</span></span>
+      <span>RX-B: <span class="footer-val">YAGI 12dBi</span></span>
+      <span>BPF: <span class="footer-val">2.4-2.5G</span></span>
+      <span>RATE: <span class="footer-val">30.72 MSPS</span></span>
+      <span>FFT: <span class="footer-val">4096</span></span>
+    </div>
+    <div class="right">
+      SENTINEL v1.0 &mdash; SIMULATED
+    </div>
+  </div>
+</div>
+
+<!-- ALERT BANNER -->
+<div id="alert-banner">TARGET DETECTED &mdash; TRACKING</div>
+
+<script>
+(function() {
+  "use strict";
+
+  // ═══════════════════════════════════════════════════
+  //  SIMULATION ENGINE
+  // ═══════════════════════════════════════════════════
+
+  const TWO_PI = Math.PI * 2;
+  const DEG = Math.PI / 180;
+
+  // --- Clock ---
+  function updateClock() {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    document.getElementById('sys-clock').textContent =
+      pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+    document.getElementById('sys-date').textContent =
+      now.getFullYear() + '-' + pad(now.getMonth()+1) + '-' + pad(now.getDate());
+  }
+  setInterval(updateClock, 1000);
+  updateClock();
+
+  // ═══════════════════════════════════════════════════
+  //  SIMULATED TARGETS
+  // ═══════════════════════════════════════════════════
+
+  const DRONE_TYPES = [
+    { name: "DJI Mavic 3",  proto: "OcuSync 3", freq: 2437, bw: 10, color: "#ff3c3c", threat: "HIGH" },
+    { name: "DJI Mini 4",   proto: "OcuSync 3", freq: 2427, bw: 10, color: "#ff6644", threat: "HIGH" },
+    { name: "FPV Racer",    proto: "ELRS",       freq: 2440, bw: 0.5, color: "#ffaa00", threat: "MED" },
+    { name: "Skydio X10",   proto: "WiFi",       freq: 2412, bw: 20, color: "#ff8833", threat: "HIGH" },
+    { name: "WiFi AP",      proto: "802.11n",    freq: 2437, bw: 20, color: "#666666", threat: "LOW" },
+    { name: "RC Hobby",     proto: "FrSky",      freq: 2450, bw: 1,  color: "#ffaa00", threat: "MED" },
+    { name: "DJI Phantom",  proto: "OcuSync 2", freq: 2432, bw: 10, color: "#ff3c3c", threat: "HIGH" },
+    { name: "Autel EVO",    proto: "WiFi",       freq: 2422, bw: 20, color: "#ff6644", threat: "HIGH" },
+  ];
+
+  class SimTarget {
+    constructor(id) {
+      this.id = "TGT-" + String(id).padStart(3, '0');
+      const tmpl = DRONE_TYPES[Math.floor(Math.random() * DRONE_TYPES.length)];
+      this.type = tmpl.name;
+      this.proto = tmpl.proto;
+      this.freq = tmpl.freq + (Math.random() - 0.5) * 4;
+      this.bw = tmpl.bw;
+      this.color = tmpl.color;
+      this.threat = tmpl.threat;
+
+      // Position in polar (bearing + range in meters)
+      this.bearing = Math.random() * 360;
+      this.range = 200 + Math.random() * 800;  // 200m - 1000m
+      this.altitude = 20 + Math.random() * 100;
+
+      // Motion
+      this.bearingRate = (Math.random() - 0.5) * 3; // deg/sec
+      this.rangeRate = (Math.random() - 0.5) * 20;  // m/sec
+      this.snr = 8 + Math.random() * 25;
+      this.power = -70 + Math.random() * 40;
+
+      this.age = 0;
+      this.maxAge = 15 + Math.random() * 30; // seconds
+      this.detected = performance.now();
+      this.status = "NEW";
+      this.trail = [];
+    }
+
+    update(dt) {
+      this.age += dt;
+      this.bearing = (this.bearing + this.bearingRate * dt + 360) % 360;
+      this.range = Math.max(50, Math.min(1200, this.range + this.rangeRate * dt));
+      this.snr += (Math.random() - 0.5) * 2 * dt;
+      this.snr = Math.max(3, Math.min(35, this.snr));
+
+      // Subtle jitter
+      this.bearingRate += (Math.random() - 0.5) * 0.5 * dt;
+      this.rangeRate += (Math.random() - 0.5) * 5 * dt;
+
+      if (this.age > 2) this.status = "TRACK";
+      if (this.age > this.maxAge - 3) this.status = "FADE";
+
+      // Trail (save position every few frames)
+      if (Math.random() < 0.15) {
+        this.trail.push({ bearing: this.bearing, range: this.range, time: performance.now() });
+        if (this.trail.length > 30) this.trail.shift();
+      }
+
+      return this.age < this.maxAge;
+    }
+  }
+
+  // Target manager
+  let targets = [];
+  let nextTargetId = 1;
+  let totalDetections = 0;
+
+  function spawnTarget() {
+    const t = new SimTarget(nextTargetId++);
+    targets.push(t);
+    totalDetections++;
+    showAlert();
+  }
+
+  // Initial targets
+  setTimeout(() => spawnTarget(), 500);
+  setTimeout(() => spawnTarget(), 1500);
+  setTimeout(() => spawnTarget(), 3000);
+
+  // Periodic spawns
+  setInterval(() => {
+    if (targets.length < 6 && Math.random() < 0.3) spawnTarget();
+  }, 4000);
+
+
+  // ═══════════════════════════════════════════════════
+  //  ALERT BANNER
+  // ═══════════════════════════════════════════════════
+  const alertBanner = document.getElementById('alert-banner');
+  let alertTimeout = null;
+
+  function showAlert() {
+    alertBanner.classList.add('visible');
+    if (alertTimeout) clearTimeout(alertTimeout);
+    alertTimeout = setTimeout(() => alertBanner.classList.remove('visible'), 3000);
+  }
+
+  // ═══════════════════════════════════════════════════
+  //  RADAR PPI
+  // ═══════════════════════════════════════════════════
+  const radarCanvas = document.getElementById('radar-canvas');
+  const radarCtx = radarCanvas.getContext('2d');
+
+  let sweepAngle = 0;
+  const SWEEP_SPEED = 40; // degrees per second
+  const MAX_RANGE_M = 1200;
+
+  // Afterglow buffer for radar trails
+  let radarGlow = null;
+  let radarGlowW = 0, radarGlowH = 0;
+
+  function resizeRadar() {
+    const c = radarCanvas.parentElement;
+    const dpr = window.devicePixelRatio || 1;
+    const w = c.clientWidth;
+    const h = c.clientHeight;
+    radarCanvas.width = w * dpr;
+    radarCanvas.height = h * dpr;
+    radarCanvas.style.width = w + 'px';
+    radarCanvas.style.height = h + 'px';
+    radarCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    // Re-create glow buffer
+    radarGlowW = w;
+    radarGlowH = h;
+    const offscreen = document.createElement('canvas');
+    offscreen.width = w;
+    offscreen.height = h;
+    radarGlow = offscreen;
+  }
+
+  function drawRadar(dt) {
+    const w = radarCanvas.clientWidth;
+    const h = radarCanvas.clientHeight;
+    const cx = w / 2;
+    const cy = h / 2;
+    const maxR = Math.min(cx, cy) - 30;
+
+    // Clear
+    radarCtx.fillStyle = '#0a0a0f';
+    radarCtx.fillRect(0, 0, w, h);
+
+    // --- Range rings ---
+    const rings = 5;
+    for (let i = 1; i <= rings; i++) {
+      const r = (i / rings) * maxR;
+      radarCtx.beginPath();
+      radarCtx.arc(cx, cy, r, 0, TWO_PI);
+      radarCtx.strokeStyle = i === rings ? '#1a3a2a' : '#0f2518';
+      radarCtx.lineWidth = 1;
+      radarCtx.stroke();
+
+      // Range label
+      const rangeMLabel = Math.round((i / rings) * MAX_RANGE_M);
+      radarCtx.fillStyle = '#334433';
+      radarCtx.font = "9px 'Share Tech Mono', monospace";
+      radarCtx.textAlign = 'left';
+      radarCtx.fillText(rangeMLabel + 'm', cx + 4, cy - r + 10);
+    }
+
+    // --- Cardinal lines ---
+    const cardinals = ['N', 'E', 'S', 'W'];
+    for (let i = 0; i < 4; i++) {
+      const angle = (i * 90 - 90) * DEG;
+      radarCtx.beginPath();
+      radarCtx.moveTo(cx, cy);
+      radarCtx.lineTo(cx + Math.cos(angle) * maxR, cy + Math.sin(angle) * maxR);
+      radarCtx.strokeStyle = '#1a3a2a';
+      radarCtx.lineWidth = 1;
+      radarCtx.stroke();
+
+      // Cardinal label
+      radarCtx.fillStyle = '#446655';
+      radarCtx.font = "bold 12px 'Share Tech Mono', monospace";
+      radarCtx.textAlign = 'center';
+      radarCtx.textBaseline = 'middle';
+      radarCtx.fillText(
+        cardinals[i],
+        cx + Math.cos(angle) * (maxR + 16),
+        cy + Math.sin(angle) * (maxR + 16)
+      );
+    }
+
+    // --- 30-degree tick marks ---
+    for (let deg = 0; deg < 360; deg += 30) {
+      if (deg % 90 === 0) continue;
+      const angle = (deg - 90) * DEG;
+      radarCtx.beginPath();
+      radarCtx.moveTo(cx + Math.cos(angle) * (maxR - 6), cy + Math.sin(angle) * (maxR - 6));
+      radarCtx.lineTo(cx + Math.cos(angle) * maxR, cy + Math.sin(angle) * maxR);
+      radarCtx.strokeStyle = '#1a3a2a';
+      radarCtx.lineWidth = 1;
+      radarCtx.stroke();
+
+      // Degree label
+      radarCtx.fillStyle = '#223322';
+      radarCtx.font = "8px 'Share Tech Mono', monospace";
+      radarCtx.textAlign = 'center';
+      radarCtx.fillText(deg + '°', cx + Math.cos(angle) * (maxR + 14), cy + Math.sin(angle) * (maxR + 14));
+    }
+
+    // --- Sweep line ---
+    sweepAngle = (sweepAngle + SWEEP_SPEED * dt) % 360;
+    const sweepRad = (sweepAngle - 90) * DEG;
+
+    // Sweep gradient (fading trail)
+    const sweepGrad = radarCtx.createConicalGradient
+      ? null  // Not widely supported
+      : null;
+
+    // Draw sweep trail (manual arc fade)
+    for (let trail = 30; trail >= 0; trail--) {
+      const trailAngle = ((sweepAngle - trail * 2) - 90) * DEG;
+      const alpha = (1 - trail / 30) * 0.15;
+      radarCtx.beginPath();
+      radarCtx.moveTo(cx, cy);
+      radarCtx.lineTo(cx + Math.cos(trailAngle) * maxR, cy + Math.sin(trailAngle) * maxR);
+      radarCtx.strokeStyle = `rgba(0, 255, 136, ${alpha})`;
+      radarCtx.lineWidth = 1;
+      radarCtx.stroke();
+    }
+
+    // Main sweep line
+    radarCtx.beginPath();
+    radarCtx.moveTo(cx, cy);
+    radarCtx.lineTo(cx + Math.cos(sweepRad) * maxR, cy + Math.sin(sweepRad) * maxR);
+    radarCtx.strokeStyle = '#00ff88';
+    radarCtx.lineWidth = 2;
+    radarCtx.shadowColor = '#00ff88';
+    radarCtx.shadowBlur = 8;
+    radarCtx.stroke();
+    radarCtx.shadowBlur = 0;
+
+    // --- Targets ---
+    for (const tgt of targets) {
+      const r = (tgt.range / MAX_RANGE_M) * maxR;
+      const angle = (tgt.bearing - 90) * DEG;
+      const tx = cx + Math.cos(angle) * r;
+      const ty = cy + Math.sin(angle) * r;
+
+      // Trail (history dots)
+      radarCtx.globalAlpha = 0.3;
+      for (let ti = 0; ti < tgt.trail.length; ti++) {
+        const tp = tgt.trail[ti];
+        const tr = (tp.range / MAX_RANGE_M) * maxR;
+        const ta = (tp.bearing - 90) * DEG;
+        const ttx = cx + Math.cos(ta) * tr;
+        const tty = cy + Math.sin(ta) * tr;
+        const age = (performance.now() - tp.time) / 1000;
+        const alpha = Math.max(0, 0.3 - age * 0.03);
+        radarCtx.fillStyle = tgt.color;
+        radarCtx.globalAlpha = alpha;
+        radarCtx.beginPath();
+        radarCtx.arc(ttx, tty, 2, 0, TWO_PI);
+        radarCtx.fill();
+      }
+      radarCtx.globalAlpha = 1;
+
+      // Target blip
+      const blipPulse = 1 + 0.3 * Math.sin(performance.now() / 300);
+      const blipSize = tgt.threat === "HIGH" ? 5 * blipPulse : 4;
+
+      radarCtx.fillStyle = tgt.color;
+      radarCtx.shadowColor = tgt.color;
+      radarCtx.shadowBlur = tgt.threat === "HIGH" ? 12 : 6;
+
+      if (tgt.threat === "HIGH") {
+        // Diamond shape for high threats
+        radarCtx.beginPath();
+        radarCtx.moveTo(tx, ty - blipSize);
+        radarCtx.lineTo(tx + blipSize, ty);
+        radarCtx.lineTo(tx, ty + blipSize);
+        radarCtx.lineTo(tx - blipSize, ty);
+        radarCtx.closePath();
+        radarCtx.fill();
+      } else {
+        // Circle for others
+        radarCtx.beginPath();
+        radarCtx.arc(tx, ty, blipSize, 0, TWO_PI);
+        radarCtx.fill();
+      }
+      radarCtx.shadowBlur = 0;
+
+      // Velocity vector
+      const velAngle = (tgt.bearing + tgt.bearingRate * 5 - 90) * DEG;
+      const velR = ((tgt.range + tgt.rangeRate * 5) / MAX_RANGE_M) * maxR;
+      const vx = cx + Math.cos(velAngle) * velR;
+      const vy = cy + Math.sin(velAngle) * velR;
+      radarCtx.beginPath();
+      radarCtx.moveTo(tx, ty);
+      radarCtx.lineTo(vx, vy);
+      radarCtx.strokeStyle = tgt.color + '88';
+      radarCtx.lineWidth = 1;
+      radarCtx.setLineDash([3, 3]);
+      radarCtx.stroke();
+      radarCtx.setLineDash([]);
+
+      // Label
+      radarCtx.fillStyle = tgt.color;
+      radarCtx.font = "9px 'Share Tech Mono', monospace";
+      radarCtx.textAlign = 'left';
+      radarCtx.fillText(tgt.id, tx + 8, ty - 4);
+      radarCtx.fillStyle = '#668877';
+      radarCtx.fillText(Math.round(tgt.range) + 'm', tx + 8, ty + 6);
+    }
+
+    // --- Center crosshair ---
+    radarCtx.strokeStyle = '#00ff8866';
+    radarCtx.lineWidth = 1;
+    radarCtx.beginPath();
+    radarCtx.moveTo(cx - 8, cy);
+    radarCtx.lineTo(cx + 8, cy);
+    radarCtx.stroke();
+    radarCtx.beginPath();
+    radarCtx.moveTo(cx, cy - 8);
+    radarCtx.lineTo(cx, cy + 8);
+    radarCtx.stroke();
+
+    // Update azimuth display
+    document.getElementById('az-val').textContent = sweepAngle.toFixed(1) + '°';
+  }
+
+
+  // ═══════════════════════════════════════════════════
+  //  SPECTRUM ANALYZER
+  // ═══════════════════════════════════════════════════
+  const specCanvas = document.getElementById('spectrum-canvas');
+  const specCtx = specCanvas.getContext('2d');
+
+  const SPEC_FREQ_MIN = 2400;
+  const SPEC_FREQ_MAX = 2500;
+  const SPEC_DB_MIN = -100;
+  const SPEC_DB_MAX = -20;
+  const SPEC_BINS = 512;
+
+  // Generate noise floor
+  let noiseFloor = new Float32Array(SPEC_BINS);
+  for (let i = 0; i < SPEC_BINS; i++) noiseFloor[i] = -88 + Math.random() * 4;
+
+  function resizeSpectrum() {
+    const c = specCanvas.parentElement;
+    const dpr = window.devicePixelRatio || 1;
+    specCanvas.width = c.clientWidth * dpr;
+    specCanvas.height = c.clientHeight * dpr;
+    specCanvas.style.width = c.clientWidth + 'px';
+    specCanvas.style.height = c.clientHeight + 'px';
+    specCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function generateSpectrum() {
+    const spec = new Float32Array(SPEC_BINS);
+    for (let i = 0; i < SPEC_BINS; i++) {
+      spec[i] = noiseFloor[i] + (Math.random() - 0.5) * 3;
+    }
+
+    // Add target signals
+    for (const tgt of targets) {
+      const centerBin = Math.round(((tgt.freq - SPEC_FREQ_MIN) / (SPEC_FREQ_MAX - SPEC_FREQ_MIN)) * SPEC_BINS);
+      const bwBins = Math.max(2, Math.round((tgt.bw / (SPEC_FREQ_MAX - SPEC_FREQ_MIN)) * SPEC_BINS));
+
+      for (let b = -bwBins; b <= bwBins; b++) {
+        const idx = centerBin + b;
+        if (idx >= 0 && idx < SPEC_BINS) {
+          // Gaussian-ish shape
+          const shape = Math.exp(-0.5 * (b / (bwBins * 0.4)) ** 2);
+          const sigPower = tgt.power + tgt.snr * shape + (Math.random() - 0.5) * 2;
+          spec[idx] = Math.max(spec[idx], sigPower);
+        }
+      }
+    }
+
+    return spec;
+  }
+
+  function drawSpectrum() {
+    const w = specCanvas.clientWidth;
+    const h = specCanvas.clientHeight;
+    const M = { top: 15, right: 15, bottom: 30, left: 50 };
+    const plotW = w - M.left - M.right;
+    const plotH = h - M.top - M.bottom;
+
+    specCtx.fillStyle = '#0a0a0f';
+    specCtx.fillRect(0, 0, w, h);
+
+    const spec = generateSpectrum();
+    const dbRange = SPEC_DB_MAX - SPEC_DB_MIN;
+
+    function xPx(freq) { return M.left + ((freq - SPEC_FREQ_MIN) / (SPEC_FREQ_MAX - SPEC_FREQ_MIN)) * plotW; }
+    function yPx(db) { return M.top + (1 - (db - SPEC_DB_MIN) / dbRange) * plotH; }
+
+    // Grid
+    specCtx.strokeStyle = '#0f2518';
+    specCtx.lineWidth = 0.5;
+    specCtx.font = "9px 'Share Tech Mono', monospace";
+
+    // Horizontal grid (dB)
+    specCtx.textAlign = 'right';
+    specCtx.textBaseline = 'middle';
+    for (let db = SPEC_DB_MIN; db <= SPEC_DB_MAX; db += 10) {
+      const y = yPx(db);
+      specCtx.beginPath();
+      specCtx.moveTo(M.left, y);
+      specCtx.lineTo(w - M.right, y);
+      specCtx.stroke();
+      specCtx.fillStyle = '#334433';
+      specCtx.fillText(db + '', M.left - 4, y);
+    }
+
+    // Vertical grid (freq)
+    specCtx.textAlign = 'center';
+    specCtx.textBaseline = 'top';
+    for (let freq = 2400; freq <= 2500; freq += 10) {
+      const x = xPx(freq);
+      specCtx.beginPath();
+      specCtx.moveTo(x, M.top);
+      specCtx.lineTo(x, h - M.bottom);
+      specCtx.stroke();
+      specCtx.fillStyle = '#334433';
+      specCtx.fillText(freq, x, h - M.bottom + 4);
+    }
+
+    // WiFi channel labels
+    const wifiChannels = [
+      { ch: 1, freq: 2412 }, { ch: 6, freq: 2437 }, { ch: 11, freq: 2462 }
+    ];
+    for (const ch of wifiChannels) {
+      const x = xPx(ch.freq);
+      specCtx.fillStyle = '#223344';
+      specCtx.font = "8px 'Share Tech Mono', monospace";
+      specCtx.textAlign = 'center';
+      specCtx.fillText('CH' + ch.ch, x, M.top + 4);
+    }
+
+    // Detection bands
+    for (const tgt of targets) {
+      const x1 = xPx(tgt.freq - tgt.bw / 2);
+      const x2 = xPx(tgt.freq + tgt.bw / 2);
+      specCtx.fillStyle = tgt.threat === 'HIGH'
+        ? 'rgba(255, 60, 60, 0.08)'
+        : 'rgba(255, 170, 0, 0.06)';
+      specCtx.fillRect(x1, M.top, x2 - x1, plotH);
+
+      // Detection label
+      specCtx.fillStyle = tgt.color + 'aa';
+      specCtx.font = "8px 'Share Tech Mono', monospace";
+      specCtx.textAlign = 'center';
+      specCtx.fillText(tgt.id, xPx(tgt.freq), M.top + 16);
+    }
+
+    // Noise floor reference
+    specCtx.strokeStyle = '#333333';
+    specCtx.lineWidth = 1;
+    specCtx.setLineDash([4, 4]);
+    specCtx.beginPath();
+    specCtx.moveTo(M.left, yPx(-86));
+    specCtx.lineTo(w - M.right, yPx(-86));
+    specCtx.stroke();
+    specCtx.setLineDash([]);
+
+    specCtx.fillStyle = '#444444';
+    specCtx.font = "8px 'Share Tech Mono', monospace";
+    specCtx.textAlign = 'left';
+    specCtx.fillText('NF -86 dBm', w - M.right - 60, yPx(-86) - 4);
+
+    // Filled spectrum under curve
+    specCtx.beginPath();
+    specCtx.moveTo(M.left, yPx(SPEC_DB_MIN));
+    for (let i = 0; i < SPEC_BINS; i++) {
+      const freq = SPEC_FREQ_MIN + (i / SPEC_BINS) * (SPEC_FREQ_MAX - SPEC_FREQ_MIN);
+      specCtx.lineTo(xPx(freq), yPx(spec[i]));
+    }
+    specCtx.lineTo(w - M.right, yPx(SPEC_DB_MIN));
+    specCtx.closePath();
+    const fillGrad = specCtx.createLinearGradient(0, M.top, 0, h - M.bottom);
+    fillGrad.addColorStop(0, 'rgba(0, 255, 136, 0.25)');
+    fillGrad.addColorStop(0.5, 'rgba(0, 255, 136, 0.05)');
+    fillGrad.addColorStop(1, 'rgba(0, 255, 136, 0)');
+    specCtx.fillStyle = fillGrad;
+    specCtx.fill();
+
+    // Spectrum line
+    specCtx.beginPath();
+    for (let i = 0; i < SPEC_BINS; i++) {
+      const freq = SPEC_FREQ_MIN + (i / SPEC_BINS) * (SPEC_FREQ_MAX - SPEC_FREQ_MIN);
+      const x = xPx(freq);
+      const y = yPx(spec[i]);
+      if (i === 0) specCtx.moveTo(x, y);
+      else specCtx.lineTo(x, y);
+    }
+    specCtx.strokeStyle = '#00ff88';
+    specCtx.lineWidth = 1.5;
+    specCtx.shadowColor = '#00ff8844';
+    specCtx.shadowBlur = 4;
+    specCtx.stroke();
+    specCtx.shadowBlur = 0;
+
+    // Plot border
+    specCtx.strokeStyle = '#1a3a2a';
+    specCtx.lineWidth = 1;
+    specCtx.strokeRect(M.left, M.top, plotW, plotH);
+
+    // Axis labels
+    specCtx.fillStyle = '#446655';
+    specCtx.font = "10px 'Share Tech Mono', monospace";
+    specCtx.textAlign = 'center';
+    specCtx.fillText('MHz', M.left + plotW / 2, h - 2);
+
+    specCtx.save();
+    specCtx.translate(8, M.top + plotH / 2);
+    specCtx.rotate(-Math.PI / 2);
+    specCtx.fillText('dBm', 0, 0);
+    specCtx.restore();
+  }
+
+
+  // ═══════════════════════════════════════════════════
+  //  WATERFALL / SPECTROGRAM
+  // ═══════════════════════════════════════════════════
+  const wfCanvas = document.getElementById('waterfall-canvas');
+  const wfCtx = wfCanvas.getContext('2d');
+
+  const WF_HISTORY = 256;
+  let wfData = [];
+
+  function resizeWaterfall() {
+    const c = wfCanvas.parentElement;
+    const dpr = window.devicePixelRatio || 1;
+    wfCanvas.width = c.clientWidth * dpr;
+    wfCanvas.height = c.clientHeight * dpr;
+    wfCanvas.style.width = c.clientWidth + 'px';
+    wfCanvas.style.height = c.clientHeight + 'px';
+    wfCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+
+  function heatColor(val) {
+    // val: 0 (cold/noise) to 1 (hot/signal)
+    const v = Math.max(0, Math.min(1, val));
+    if (v < 0.25) {
+      // Black → dark blue
+      const t = v / 0.25;
+      return `rgb(0, 0, ${Math.round(t * 80)})`;
+    } else if (v < 0.5) {
+      // Dark blue → green
+      const t = (v - 0.25) / 0.25;
+      return `rgb(0, ${Math.round(t * 200)}, ${Math.round(80 - t * 40)})`;
+    } else if (v < 0.75) {
+      // Green → yellow
+      const t = (v - 0.5) / 0.25;
+      return `rgb(${Math.round(t * 255)}, ${Math.round(200 + t * 55)}, ${Math.round(40 - t * 40)})`;
+    } else {
+      // Yellow → red → white
+      const t = (v - 0.75) / 0.25;
+      return `rgb(255, ${Math.round(255 - t * 120)}, ${Math.round(t * 200)})`;
+    }
+  }
+
+  function drawWaterfall() {
+    const w = wfCanvas.clientWidth;
+    const h = wfCanvas.clientHeight;
+    const M = { top: 10, right: 15, bottom: 25, left: 50 };
+    const plotW = w - M.left - M.right;
+    const plotH = h - M.top - M.bottom;
+
+    wfCtx.fillStyle = '#0a0a0f';
+    wfCtx.fillRect(0, 0, w, h);
+
+    // Generate new spectrum line
+    const spec = generateSpectrum();
+    const normalized = new Float32Array(SPEC_BINS);
+    for (let i = 0; i < SPEC_BINS; i++) {
+      normalized[i] = (spec[i] - SPEC_DB_MIN) / (SPEC_DB_MAX - SPEC_DB_MIN);
+    }
+    wfData.push(normalized);
+    if (wfData.length > WF_HISTORY) wfData.shift();
+
+    // Draw waterfall
+    const rowH = Math.max(1, plotH / WF_HISTORY);
+    for (let row = 0; row < wfData.length; row++) {
+      const y = M.top + plotH - (wfData.length - row) * rowH;
+      if (y < M.top) continue;
+
+      const binW = plotW / SPEC_BINS;
+      for (let bin = 0; bin < SPEC_BINS; bin++) {
+        wfCtx.fillStyle = heatColor(wfData[row][bin]);
+        wfCtx.fillRect(M.left + bin * binW, y, Math.ceil(binW), Math.ceil(rowH));
+      }
+    }
+
+    // Freq axis labels
+    wfCtx.font = "9px 'Share Tech Mono', monospace";
+    wfCtx.textAlign = 'center';
+    wfCtx.textBaseline = 'top';
+    for (let freq = 2400; freq <= 2500; freq += 10) {
+      const x = M.left + ((freq - SPEC_FREQ_MIN) / (SPEC_FREQ_MAX - SPEC_FREQ_MIN)) * plotW;
+      wfCtx.fillStyle = '#334433';
+      wfCtx.fillText(freq, x, h - M.bottom + 4);
+    }
+
+    // Time axis label
+    wfCtx.fillStyle = '#334433';
+    wfCtx.font = "8px 'Share Tech Mono', monospace";
+    wfCtx.save();
+    wfCtx.translate(8, M.top + plotH / 2);
+    wfCtx.rotate(-Math.PI / 2);
+    wfCtx.textAlign = 'center';
+    wfCtx.fillText('TIME', 0, 0);
+    wfCtx.restore();
+
+    // "Now" indicator
+    wfCtx.fillStyle = '#00ff88';
+    wfCtx.font = "8px 'Share Tech Mono', monospace";
+    wfCtx.textAlign = 'right';
+    wfCtx.fillText('NOW ▶', M.left - 4, M.top + plotH - 2);
+
+    // Color legend
+    const legendW = 12;
+    const legendH = plotH * 0.5;
+    const legendX = w - M.right + 2;
+    const legendY = M.top + (plotH - legendH) / 2;
+    for (let i = 0; i < legendH; i++) {
+      const val = 1 - i / legendH;
+      wfCtx.fillStyle = heatColor(val);
+      wfCtx.fillRect(legendX, legendY + i, legendW, 1);
+    }
+    wfCtx.fillStyle = '#334433';
+    wfCtx.font = "7px 'Share Tech Mono', monospace";
+    wfCtx.textAlign = 'left';
+
+    // Plot border
+    wfCtx.strokeStyle = '#1a3a2a';
+    wfCtx.lineWidth = 1;
+    wfCtx.strokeRect(M.left, M.top, plotW, plotH);
+  }
+
+
+  // ═══════════════════════════════════════════════════
+  //  THREAT TABLE
+  // ═══════════════════════════════════════════════════
+  const threatBody = document.getElementById('threat-body');
+  const trackCountEl = document.getElementById('track-count');
+  const threatBadge = document.getElementById('threat-badge');
+
+  function updateThreatTable() {
+    threatBody.innerHTML = '';
+
+    for (const tgt of targets) {
+      const tr = document.createElement('tr');
+      if (tgt.threat === 'HIGH') tr.classList.add('highlight');
+
+      const threatClass = tgt.threat === 'HIGH' ? 'threat-level-high'
+        : tgt.threat === 'MED' ? 'threat-level-med' : 'threat-level-low';
+
+      const statusColor = tgt.status === 'NEW' ? 'var(--cyan)'
+        : tgt.status === 'TRACK' ? 'var(--green)' : 'var(--text-dim)';
+
+      tr.innerHTML = `
+        <td class="threat-id">${tgt.id}</td>
+        <td class="threat-type">${tgt.type}</td>
+        <td class="threat-freq">${tgt.freq.toFixed(1)}</td>
+        <td class="threat-bearing">${tgt.bearing.toFixed(0)}°</td>
+        <td class="threat-range">${Math.round(tgt.range)}m</td>
+        <td class="threat-snr">${tgt.snr.toFixed(1)}</td>
+        <td class="${threatClass}">${tgt.threat}</td>
+        <td style="color:${statusColor}">${tgt.status}</td>
+      `;
+      threatBody.appendChild(tr);
+    }
+
+    trackCountEl.textContent = targets.length + ' TRACKS';
+
+    const hasHigh = targets.some(t => t.threat === 'HIGH');
+    if (hasHigh) {
+      threatBadge.textContent = 'ALERT';
+      threatBadge.className = 'badge badge-alert';
+    } else if (targets.length > 0) {
+      threatBadge.textContent = 'ACTIVE';
+      threatBadge.className = 'badge badge-warn';
+    } else {
+      threatBadge.textContent = 'CLEAR';
+      threatBadge.className = 'badge badge-active';
+    }
+
+    // Update scan mode
+    const tracking = targets.some(t => t.status === 'TRACK' && t.threat === 'HIGH');
+    const modeEl = document.getElementById('mode-val');
+    const modeBadge = document.getElementById('scan-mode-badge');
+    const modeLabel = document.getElementById('scan-mode-label');
+    if (tracking) {
+      modeEl.textContent = 'TRACK';
+      modeBadge.textContent = 'TRACK';
+      modeBadge.className = 'badge badge-alert';
+      modeLabel.textContent = 'LOCKED';
+    } else if (targets.length > 0) {
+      modeEl.textContent = 'CUE';
+      modeBadge.textContent = 'CUE';
+      modeBadge.className = 'badge badge-warn';
+      modeLabel.textContent = 'CUEING';
+    } else {
+      modeEl.textContent = 'SWEEP';
+      modeBadge.textContent = 'SCAN';
+      modeBadge.className = 'badge badge-active';
+      modeLabel.textContent = 'SCANNING';
+    }
+  }
+
+
+  // ═══════════════════════════════════════════════════
+  //  MAIN LOOP
+  // ═══════════════════════════════════════════════════
+  let lastTime = performance.now();
+  let tableUpdateTimer = 0;
+
+  function resize() {
+    resizeRadar();
+    resizeSpectrum();
+    resizeWaterfall();
+  }
+
+  window.addEventListener('resize', resize);
+  resize();
+
+  function mainLoop() {
+    const now = performance.now();
+    const dt = Math.min(0.1, (now - lastTime) / 1000);
+    lastTime = now;
+
+    // Update targets
+    targets = targets.filter(t => t.update(dt));
+
+    // Draw panels
+    drawRadar(dt);
+    drawSpectrum();
+    drawWaterfall();
+
+    // Update threat table (throttled)
+    tableUpdateTimer += dt;
+    if (tableUpdateTimer > 0.5) {
+      updateThreatTable();
+      tableUpdateTimer = 0;
+    }
+
+    requestAnimationFrame(mainLoop);
+  }
+
+  requestAnimationFrame(mainLoop);
+
+})();
+</script>
+</body>
+</html>
