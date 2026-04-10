@@ -42,6 +42,25 @@
     flex: 1;
     position: relative;
     min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  #spectrum-container {
+    flex: 0 0 35%;
+    position: relative;
+  }
+
+  #persistence-container {
+    flex: 0 0 40px;
+    position: relative;
+    border-top: 1px solid #1a3a2a;
+  }
+
+  #waterfall-container {
+    flex: 1;
+    position: relative;
+    border-top: 1px solid #1a3a2a;
   }
 
   canvas {
@@ -97,7 +116,15 @@
 </div>
 
 <div id="canvas-container">
-  <canvas id="spectrum"></canvas>
+  <div id="spectrum-container">
+    <canvas id="spectrum"></canvas>
+  </div>
+  <div id="persistence-container">
+    <canvas id="persistence"></canvas>
+  </div>
+  <div id="waterfall-container">
+    <canvas id="waterfall"></canvas>
+  </div>
 </div>
 
 <div id="status-bar">
@@ -125,24 +152,34 @@
     <span class="status-label">Detections:</span>
     <span id="det-info" class="status-value">0</span>
   </div>
+  <div class="status-item">
+    <span class="status-label">Max Persist:</span>
+    <span id="persist-info" class="status-value">0%</span>
+  </div>
 </div>
 
 <script>
 (function() {
   "use strict";
 
-  // --- State ---
-  const canvas = document.getElementById("spectrum");
-  const ctx = canvas.getContext("2d");
+  // --- Canvases ---
+  const specCanvas = document.getElementById("spectrum");
+  const specCtx = specCanvas.getContext("2d");
+  const persCanvas = document.getElementById("persistence");
+  const persCtx = persCanvas.getContext("2d");
+  const wfCanvas = document.getElementById("waterfall");
+  const wfCtx = wfCanvas.getContext("2d");
 
-  let freqMhz = null;      // frequency axis from server (set once)
-  let powerDbm = null;      // latest PSD frame
+  // --- State ---
+  let freqMhz = null;
+  let powerDbm = null;
+  let persistence = null;  // 0.0-1.0 per bin
   let peakFreqMhz = 0;
   let peakPowerDbm = -100;
   let noiseFloorDbm = -90;
   let frameCount = 0;
-  let detections = [];       // current frame detections
-  let detectionCount = 0;    // cumulative detection count
+  let detections = [];
+  let detectionCount = 0;
   let ws = null;
 
   // FPS measurement
@@ -153,7 +190,46 @@
   // Plot range
   const DB_MIN = -100;
   const DB_MAX = -20;
-  const MARGIN = { top: 20, right: 20, bottom: 40, left: 60 };
+  const MARGIN = { top: 20, right: 20, bottom: 30, left: 60 };
+
+  // Persistence threshold for "significant" activity
+  const PERSIST_ALERT_THRESHOLD = 0.5;
+
+  // Waterfall colormap
+  const COLORMAP_SIZE = 256;
+  const colormap = new Array(COLORMAP_SIZE);
+  (function buildColormap() {
+    for (let i = 0; i < COLORMAP_SIZE; i++) {
+      const t = i / (COLORMAP_SIZE - 1);
+      let r, g, b;
+      if (t < 0.15) {
+        const s = t / 0.15;
+        r = 0; g = 0; b = Math.floor(80 * s);
+      } else if (t < 0.35) {
+        const s = (t - 0.15) / 0.20;
+        r = 0; g = Math.floor(255 * s); b = 80 + Math.floor(175 * s);
+      } else if (t < 0.55) {
+        const s = (t - 0.35) / 0.20;
+        r = 0; g = 255; b = Math.floor(255 * (1 - s));
+      } else if (t < 0.75) {
+        const s = (t - 0.55) / 0.20;
+        r = Math.floor(255 * s); g = 255; b = 0;
+      } else if (t < 0.9) {
+        const s = (t - 0.75) / 0.15;
+        r = 255; g = Math.floor(255 * (1 - s)); b = 0;
+      } else {
+        const s = (t - 0.9) / 0.10;
+        r = 255; g = Math.floor(255 * s); b = Math.floor(255 * s);
+      }
+      colormap[i] = "rgb(" + r + "," + g + "," + b + ")";
+    }
+  })();
+
+  function dbToColorIndex(db) {
+    const t = (db - DB_MIN) / (DB_MAX - DB_MIN);
+    const clamped = Math.max(0, Math.min(1, t));
+    return Math.floor(clamped * (COLORMAP_SIZE - 1));
+  }
 
   // --- DOM refs ---
   const configInfoEl = document.getElementById("config-info");
@@ -164,40 +240,100 @@
   const frameInfoEl = document.getElementById("frame-info");
   const fpsInfoEl = document.getElementById("fps-info");
   const detInfoEl = document.getElementById("det-info");
+  const persistInfoEl = document.getElementById("persist-info");
 
   // --- HiDPI canvas setup ---
   function resizeCanvas() {
-    const container = canvas.parentElement;
     const dpr = window.devicePixelRatio || 1;
-    const w = container.clientWidth;
-    const h = container.clientHeight;
-    canvas.width = w * dpr;
-    canvas.height = h * dpr;
-    canvas.style.width = w + "px";
-    canvas.style.height = h + "px";
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    [specCanvas, persCanvas, wfCanvas].forEach(function(c) {
+      const container = c.parentElement;
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      c.width = w * dpr;
+      c.height = h * dpr;
+      c.style.width = w + "px";
+      c.style.height = h + "px";
+      c.getContext("2d").setTransform(dpr, 0, 0, dpr, 0, 0);
+    });
   }
 
   window.addEventListener("resize", resizeCanvas);
   resizeCanvas();
 
-  // --- Drawing ---
+  // --- Waterfall state ---
+  let wfImageCanvas = document.createElement("canvas");
+  let wfImageCtx = wfImageCanvas.getContext("2d");
+  let wfInitialized = false;
+
+  function initWaterfallBuffer() {
+    const dpr = window.devicePixelRatio || 1;
+    const ww = wfCanvas.parentElement.clientWidth;
+    const wh = wfCanvas.parentElement.clientHeight;
+    wfImageCanvas.width = ww * dpr;
+    wfImageCanvas.height = wh * dpr;
+    wfImageCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    wfImageCtx.fillStyle = "#0a0a0f";
+    wfImageCtx.fillRect(0, 0, ww, wh);
+    wfInitialized = true;
+  }
+
+  window.addEventListener("resize", function() {
+    wfInitialized = false;
+  });
+
+  function pushWaterfallRow() {
+    if (!freqMhz || !powerDbm) return;
+
+    const ww = wfCanvas.parentElement.clientWidth;
+    const wh = wfCanvas.parentElement.clientHeight;
+    const dpr = window.devicePixelRatio || 1;
+
+    if (!wfInitialized) initWaterfallBuffer();
+
+    const plotLeft = MARGIN.left;
+    const plotW = ww - MARGIN.left - MARGIN.right;
+    const rowHeight = 1;
+
+    wfImageCtx.save();
+    wfImageCtx.setTransform(1, 0, 0, 1, 0, 0);
+    wfImageCtx.drawImage(wfImageCanvas,
+      0, 0, wfImageCanvas.width, wfImageCanvas.height,
+      0, rowHeight * dpr, wfImageCanvas.width, wfImageCanvas.height
+    );
+    wfImageCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    wfImageCtx.restore();
+
+    const numBins = powerDbm.length;
+    const binWidth = plotW / numBins;
+
+    for (let i = 0; i < numBins; i++) {
+      const ci = dbToColorIndex(powerDbm[i]);
+      wfImageCtx.fillStyle = colormap[ci];
+      const x = plotLeft + (i / numBins) * plotW;
+      wfImageCtx.fillRect(x, 0, Math.ceil(binWidth) + 1, rowHeight);
+    }
+
+    wfImageCtx.fillStyle = "#0a0a0f";
+    wfImageCtx.fillRect(0, 0, plotLeft, rowHeight);
+    wfImageCtx.fillRect(plotLeft + plotW, 0, MARGIN.right, rowHeight);
+  }
+
+  // --- Spectrum Drawing ---
   function drawSpectrum() {
-    const w = canvas.clientWidth;
-    const h = canvas.clientHeight;
+    const w = specCanvas.clientWidth;
+    const h = specCanvas.clientHeight;
     const plotW = w - MARGIN.left - MARGIN.right;
     const plotH = h - MARGIN.top - MARGIN.bottom;
 
-    // Clear
-    ctx.fillStyle = "#0a0a0f";
-    ctx.fillRect(0, 0, w, h);
+    specCtx.fillStyle = "#0a0a0f";
+    specCtx.fillRect(0, 0, w, h);
 
     if (!freqMhz || !powerDbm) {
-      ctx.fillStyle = "#445544";
-      ctx.font = "14px 'Courier New', monospace";
-      ctx.textAlign = "center";
-      ctx.fillText("Waiting for data...", w / 2, h / 2);
-      requestAnimationFrame(drawSpectrum);
+      specCtx.fillStyle = "#445544";
+      specCtx.font = "14px 'Courier New', monospace";
+      specCtx.textAlign = "center";
+      specCtx.fillText("Waiting for data...", w / 2, h / 2);
       return;
     }
 
@@ -205,7 +341,6 @@
     const freqMax = freqMhz[freqMhz.length - 1];
     const dbRange = DB_MAX - DB_MIN;
 
-    // Helper: data → pixel
     function xPx(freq) {
       return MARGIN.left + ((freq - freqMin) / (freqMax - freqMin)) * plotW;
     }
@@ -213,97 +348,115 @@
       return MARGIN.top + (1 - (db - DB_MIN) / dbRange) * plotH;
     }
 
-    // --- Grid lines ---
-    ctx.strokeStyle = "#1a2a1f";
-    ctx.lineWidth = 0.5;
+    // --- Persistence highlight on spectrum (draw first, behind everything) ---
+    if (persistence) {
+      specCtx.save();
+      specCtx.beginPath();
+      specCtx.rect(MARGIN.left, MARGIN.top, plotW, plotH);
+      specCtx.clip();
 
-    // Horizontal: every 10 dB
-    ctx.font = "10px 'Courier New', monospace";
-    ctx.textAlign = "right";
-    ctx.textBaseline = "middle";
-    for (let db = DB_MIN; db <= DB_MAX; db += 10) {
-      const y = yPx(db);
-      ctx.beginPath();
-      ctx.moveTo(MARGIN.left, y);
-      ctx.lineTo(w - MARGIN.right, y);
-      ctx.stroke();
-      ctx.fillStyle = "#445544";
-      ctx.fillText(db + " dBm", MARGIN.left - 6, y);
+      const step = Math.max(1, Math.floor(persistence.length / plotW));
+      for (let i = 0; i < persistence.length; i += step) {
+        const p = persistence[i];
+        if (p > 0.1) {
+          const x = MARGIN.left + (i / persistence.length) * plotW;
+          const barW = Math.max(1, plotW / persistence.length * step);
+          // Orange fill, opacity scales with persistence
+          specCtx.fillStyle = "rgba(255, 160, 0, " + (p * 0.3).toFixed(3) + ")";
+          specCtx.fillRect(x, MARGIN.top, barW, plotH);
+        }
+      }
+      specCtx.restore();
     }
 
-    // Vertical: every 5 MHz
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
+    // --- Grid lines ---
+    specCtx.strokeStyle = "#1a2a1f";
+    specCtx.lineWidth = 0.5;
+
+    specCtx.font = "10px 'Courier New', monospace";
+    specCtx.textAlign = "right";
+    specCtx.textBaseline = "middle";
+    for (let db = DB_MIN; db <= DB_MAX; db += 10) {
+      const y = yPx(db);
+      specCtx.beginPath();
+      specCtx.moveTo(MARGIN.left, y);
+      specCtx.lineTo(w - MARGIN.right, y);
+      specCtx.stroke();
+      specCtx.fillStyle = "#445544";
+      specCtx.fillText(db + " dBm", MARGIN.left - 6, y);
+    }
+
+    specCtx.textAlign = "center";
+    specCtx.textBaseline = "top";
     const freqStart = Math.ceil(freqMin / 5) * 5;
     for (let freq = freqStart; freq <= freqMax; freq += 5) {
       const x = xPx(freq);
-      ctx.beginPath();
-      ctx.moveTo(x, MARGIN.top);
-      ctx.lineTo(x, h - MARGIN.bottom);
-      ctx.stroke();
-      ctx.fillStyle = "#445544";
-      ctx.fillText(freq.toFixed(0), x, h - MARGIN.bottom + 6);
+      specCtx.beginPath();
+      specCtx.moveTo(x, MARGIN.top);
+      specCtx.lineTo(x, h - MARGIN.bottom);
+      specCtx.stroke();
+      specCtx.fillStyle = "#445544";
+      specCtx.fillText(freq.toFixed(0), x, h - MARGIN.bottom + 6);
     }
 
     // --- Axis labels ---
-    ctx.fillStyle = "#668877";
-    ctx.font = "12px 'Courier New', monospace";
-    ctx.textAlign = "center";
-    ctx.fillText("Frequency (MHz)", MARGIN.left + plotW / 2, h - 4);
+    specCtx.fillStyle = "#668877";
+    specCtx.font = "12px 'Courier New', monospace";
+    specCtx.textAlign = "center";
+    specCtx.fillText("Frequency (MHz)", MARGIN.left + plotW / 2, h - 2);
 
-    ctx.save();
-    ctx.translate(12, MARGIN.top + plotH / 2);
-    ctx.rotate(-Math.PI / 2);
-    ctx.fillText("Power (dBm)", 0, 0);
-    ctx.restore();
+    specCtx.save();
+    specCtx.translate(12, MARGIN.top + plotH / 2);
+    specCtx.rotate(-Math.PI / 2);
+    specCtx.fillText("Power (dBm)", 0, 0);
+    specCtx.restore();
 
     // --- Noise floor line ---
     if (noiseFloorDbm > DB_MIN && noiseFloorDbm < DB_MAX) {
       const nfY = yPx(noiseFloorDbm);
-      ctx.strokeStyle = "#444444";
-      ctx.lineWidth = 1;
-      ctx.setLineDash([6, 4]);
-      ctx.beginPath();
-      ctx.moveTo(MARGIN.left, nfY);
-      ctx.lineTo(w - MARGIN.right, nfY);
-      ctx.stroke();
-      ctx.setLineDash([]);
+      specCtx.strokeStyle = "#444444";
+      specCtx.lineWidth = 1;
+      specCtx.setLineDash([6, 4]);
+      specCtx.beginPath();
+      specCtx.moveTo(MARGIN.left, nfY);
+      specCtx.lineTo(w - MARGIN.right, nfY);
+      specCtx.stroke();
+      specCtx.setLineDash([]);
 
-      ctx.fillStyle = "#555555";
-      ctx.font = "10px 'Courier New', monospace";
-      ctx.textAlign = "left";
-      ctx.fillText("NF " + noiseFloorDbm.toFixed(1), w - MARGIN.right + 4, nfY + 3);
+      specCtx.fillStyle = "#555555";
+      specCtx.font = "10px 'Courier New', monospace";
+      specCtx.textAlign = "left";
+      specCtx.fillText("NF " + noiseFloorDbm.toFixed(1), w - MARGIN.right + 4, nfY + 3);
     }
 
     // --- PSD trace ---
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(MARGIN.left, MARGIN.top, plotW, plotH);
-    ctx.clip();
+    specCtx.save();
+    specCtx.beginPath();
+    specCtx.rect(MARGIN.left, MARGIN.top, plotW, plotH);
+    specCtx.clip();
 
-    // Glow effect
-    ctx.shadowColor = "#00ff8844";
-    ctx.shadowBlur = 4;
-    ctx.strokeStyle = "#00ff88";
-    ctx.lineWidth = 1.5;
+    specCtx.shadowColor = "#00ff8844";
+    specCtx.shadowBlur = 4;
+    specCtx.strokeStyle = "#00ff88";
+    specCtx.lineWidth = 1.5;
 
-    ctx.beginPath();
+    specCtx.beginPath();
     const step = Math.max(1, Math.floor(powerDbm.length / plotW));
     for (let i = 0; i < powerDbm.length; i += step) {
       const x = xPx(freqMhz[i]);
       const y = yPx(powerDbm[i]);
-      if (i === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+      if (i === 0) specCtx.moveTo(x, y);
+      else specCtx.lineTo(x, y);
     }
-    ctx.stroke();
-    ctx.restore();
+    specCtx.stroke();
+    specCtx.restore();
 
     // --- Detection markers ---
     if (detections.length > 0) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(MARGIN.left, MARGIN.top, plotW, plotH);
-      ctx.clip();
+      specCtx.save();
+      specCtx.beginPath();
+      specCtx.rect(MARGIN.left, MARGIN.top, plotW, plotH);
+      specCtx.clip();
 
       for (var di = 0; di < detections.length; di++) {
         var det = detections[di];
@@ -313,46 +466,42 @@
         var dxRight = xPx(detFreqMax);
         var dxCenter = xPx(det.freq_mhz);
 
-        // Red highlighted band
-        ctx.fillStyle = "rgba(255, 60, 60, 0.15)";
-        ctx.fillRect(dxLeft, MARGIN.top, dxRight - dxLeft, plotH);
+        specCtx.fillStyle = "rgba(255, 60, 60, 0.15)";
+        specCtx.fillRect(dxLeft, MARGIN.top, dxRight - dxLeft, plotH);
 
-        // Band edges
-        ctx.strokeStyle = "rgba(255, 60, 60, 0.5)";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(dxLeft, MARGIN.top);
-        ctx.lineTo(dxLeft, MARGIN.top + plotH);
-        ctx.stroke();
-        ctx.beginPath();
-        ctx.moveTo(dxRight, MARGIN.top);
-        ctx.lineTo(dxRight, MARGIN.top + plotH);
-        ctx.stroke();
+        specCtx.strokeStyle = "rgba(255, 60, 60, 0.5)";
+        specCtx.lineWidth = 1;
+        specCtx.beginPath();
+        specCtx.moveTo(dxLeft, MARGIN.top);
+        specCtx.lineTo(dxLeft, MARGIN.top + plotH);
+        specCtx.stroke();
+        specCtx.beginPath();
+        specCtx.moveTo(dxRight, MARGIN.top);
+        specCtx.lineTo(dxRight, MARGIN.top + plotH);
+        specCtx.stroke();
 
-        // Dashed center line
-        ctx.strokeStyle = "#ff3c3c";
-        ctx.lineWidth = 1;
-        ctx.setLineDash([4, 3]);
-        ctx.beginPath();
-        ctx.moveTo(dxCenter, MARGIN.top);
-        ctx.lineTo(dxCenter, MARGIN.top + plotH);
-        ctx.stroke();
-        ctx.setLineDash([]);
+        specCtx.strokeStyle = "#ff3c3c";
+        specCtx.lineWidth = 1;
+        specCtx.setLineDash([4, 3]);
+        specCtx.beginPath();
+        specCtx.moveTo(dxCenter, MARGIN.top);
+        specCtx.lineTo(dxCenter, MARGIN.top + plotH);
+        specCtx.stroke();
+        specCtx.setLineDash([]);
 
-        // Freq + SNR label
-        ctx.fillStyle = "#ff6666";
-        ctx.font = "10px 'Courier New', monospace";
-        ctx.textAlign = "center";
-        ctx.fillText(
+        specCtx.fillStyle = "#ff6666";
+        specCtx.font = "10px 'Courier New', monospace";
+        specCtx.textAlign = "center";
+        specCtx.fillText(
           det.freq_mhz.toFixed(2) + " MHz",
           dxCenter, MARGIN.top + 14 + di * 24
         );
-        ctx.fillText(
+        specCtx.fillText(
           "SNR " + det.snr_db.toFixed(1) + " dB",
           dxCenter, MARGIN.top + 24 + di * 24
         );
       }
-      ctx.restore();
+      specCtx.restore();
     }
 
     // --- Peak marker ---
@@ -360,38 +509,166 @@
       const px = xPx(peakFreqMhz);
       const py = yPx(peakPowerDbm);
 
-      // Triangle marker
-      ctx.fillStyle = "#ffcc00";
-      ctx.shadowColor = "#ffcc0066";
-      ctx.shadowBlur = 6;
-      ctx.beginPath();
-      ctx.moveTo(px, py - 8);
-      ctx.lineTo(px - 5, py - 2);
-      ctx.lineTo(px + 5, py - 2);
-      ctx.closePath();
-      ctx.fill();
-      ctx.shadowBlur = 0;
+      specCtx.fillStyle = "#ffcc00";
+      specCtx.shadowColor = "#ffcc0066";
+      specCtx.shadowBlur = 6;
+      specCtx.beginPath();
+      specCtx.moveTo(px, py - 8);
+      specCtx.lineTo(px - 5, py - 2);
+      specCtx.lineTo(px + 5, py - 2);
+      specCtx.closePath();
+      specCtx.fill();
+      specCtx.shadowBlur = 0;
 
-      // Label
-      ctx.fillStyle = "#ffcc00";
-      ctx.font = "10px 'Courier New', monospace";
-      ctx.textAlign = "center";
-      ctx.fillText(
-        peakFreqMhz.toFixed(2) + " MHz",
-        px, py - 12
-      );
-      ctx.fillText(
-        peakPowerDbm.toFixed(1) + " dBm",
-        px, py - 22
-      );
+      specCtx.fillStyle = "#ffcc00";
+      specCtx.font = "10px 'Courier New', monospace";
+      specCtx.textAlign = "center";
+      specCtx.fillText(peakFreqMhz.toFixed(2) + " MHz", px, py - 12);
+      specCtx.fillText(peakPowerDbm.toFixed(1) + " dBm", px, py - 22);
     }
 
     // --- Plot border ---
-    ctx.strokeStyle = "#2a4a3a";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(MARGIN.left, MARGIN.top, plotW, plotH);
+    specCtx.strokeStyle = "#2a4a3a";
+    specCtx.lineWidth = 1;
+    specCtx.strokeRect(MARGIN.left, MARGIN.top, plotW, plotH);
+  }
 
-    // --- FPS counter ---
+  // --- Persistence Bar Drawing ---
+  function drawPersistence() {
+    const w = persCanvas.clientWidth;
+    const h = persCanvas.clientHeight;
+    const plotLeft = MARGIN.left;
+    const plotW = w - MARGIN.left - MARGIN.right;
+
+    persCtx.fillStyle = "#0a0a0f";
+    persCtx.fillRect(0, 0, w, h);
+
+    if (!persistence || !freqMhz) return;
+
+    // Label
+    persCtx.fillStyle = "#668877";
+    persCtx.font = "9px 'Courier New', monospace";
+    persCtx.textAlign = "right";
+    persCtx.textBaseline = "middle";
+    persCtx.fillText("PERSIST", plotLeft - 6, h / 2);
+
+    // Draw persistence bars
+    const numBins = persistence.length;
+    const binWidth = plotW / numBins;
+    const barTop = 4;
+    const barH = h - 8;
+
+    for (let i = 0; i < numBins; i++) {
+      const p = persistence[i];
+      if (p < 0.02) continue;  // skip near-zero for perf
+
+      const x = plotLeft + (i / numBins) * plotW;
+
+      // Color: green (low) -> yellow (mid) -> orange (high) -> red (very high)
+      let r, g, b;
+      if (p < 0.3) {
+        const s = p / 0.3;
+        r = 0; g = Math.floor(180 * s); b = 0;
+      } else if (p < 0.6) {
+        const s = (p - 0.3) / 0.3;
+        r = Math.floor(255 * s); g = 180 + Math.floor(75 * s); b = 0;
+      } else {
+        const s = (p - 0.6) / 0.4;
+        r = 255; g = Math.floor(255 * (1 - s * 0.7)); b = 0;
+      }
+
+      // Bar height proportional to persistence
+      const fillH = barH * p;
+      persCtx.fillStyle = "rgb(" + r + "," + g + "," + b + ")";
+      persCtx.fillRect(x, barTop + barH - fillH, Math.ceil(binWidth) + 1, fillH);
+    }
+
+    // 50% threshold line
+    const threshY = barTop + barH * (1 - PERSIST_ALERT_THRESHOLD);
+    persCtx.strokeStyle = "rgba(255, 100, 0, 0.4)";
+    persCtx.lineWidth = 1;
+    persCtx.setLineDash([3, 3]);
+    persCtx.beginPath();
+    persCtx.moveTo(plotLeft, threshY);
+    persCtx.lineTo(plotLeft + plotW, threshY);
+    persCtx.stroke();
+    persCtx.setLineDash([]);
+
+    // Border
+    persCtx.strokeStyle = "#2a4a3a";
+    persCtx.lineWidth = 1;
+    persCtx.strokeRect(plotLeft, barTop, plotW, barH);
+  }
+
+  // --- Waterfall Drawing ---
+  function drawWaterfall() {
+    const ww = wfCanvas.clientWidth;
+    const wh = wfCanvas.clientHeight;
+    const plotLeft = MARGIN.left;
+    const plotW = ww - MARGIN.left - MARGIN.right;
+
+    wfCtx.fillStyle = "#0a0a0f";
+    wfCtx.fillRect(0, 0, ww, wh);
+
+    if (!freqMhz || !wfInitialized) {
+      wfCtx.fillStyle = "#445544";
+      wfCtx.font = "14px 'Courier New', monospace";
+      wfCtx.textAlign = "center";
+      wfCtx.fillText("Waiting for waterfall data...", ww / 2, wh / 2);
+      return;
+    }
+
+    wfCtx.drawImage(wfImageCanvas, 0, 0, ww, wh);
+
+    const freqMin = freqMhz[0];
+    const freqMax = freqMhz[freqMhz.length - 1];
+
+    wfCtx.fillStyle = "#445544";
+    wfCtx.font = "10px 'Courier New', monospace";
+    wfCtx.textAlign = "center";
+    wfCtx.textBaseline = "top";
+    const freqStart = Math.ceil(freqMin / 5) * 5;
+    for (let freq = freqStart; freq <= freqMax; freq += 5) {
+      const x = plotLeft + ((freq - freqMin) / (freqMax - freqMin)) * plotW;
+      wfCtx.strokeStyle = "#1a3a2a";
+      wfCtx.lineWidth = 0.5;
+      wfCtx.beginPath();
+      wfCtx.moveTo(x, wh - 16);
+      wfCtx.lineTo(x, wh - 12);
+      wfCtx.stroke();
+      wfCtx.fillText(freq.toFixed(0), x, wh - 12);
+    }
+
+    // Color scale legend
+    const legendX = 6;
+    const legendW = 10;
+    const legendTop = 10;
+    const legendH = Math.min(wh - 30, 200);
+    for (let i = 0; i < legendH; i++) {
+      const t = 1 - (i / legendH);
+      const ci = Math.floor(t * (COLORMAP_SIZE - 1));
+      wfCtx.fillStyle = colormap[ci];
+      wfCtx.fillRect(legendX, legendTop + i, legendW, 1);
+    }
+    wfCtx.fillStyle = "#445544";
+    wfCtx.font = "9px 'Courier New', monospace";
+    wfCtx.textAlign = "left";
+    wfCtx.textBaseline = "bottom";
+    wfCtx.fillText(DB_MAX + "", legendX + legendW + 2, legendTop + 6);
+    wfCtx.textBaseline = "top";
+    wfCtx.fillText(DB_MIN + "", legendX + legendW + 2, legendTop + legendH - 4);
+
+    wfCtx.strokeStyle = "#2a4a3a";
+    wfCtx.lineWidth = 1;
+    wfCtx.strokeRect(plotLeft, 0, plotW, wh - 16);
+  }
+
+  // --- Combined render loop ---
+  function render() {
+    drawSpectrum();
+    drawPersistence();
+    drawWaterfall();
+
     fpsFrames++;
     const now = performance.now();
     if (now - fpsLastTime >= 1000) {
@@ -401,11 +678,10 @@
       fpsInfoEl.textContent = currentFps;
     }
 
-    requestAnimationFrame(drawSpectrum);
+    requestAnimationFrame(render);
   }
 
-  // Start render loop
-  requestAnimationFrame(drawSpectrum);
+  requestAnimationFrame(render);
 
   // --- WebSocket ---
   function connect() {
@@ -422,6 +698,7 @@
       connStatus.textContent = "Reconnecting...";
       freqMhz = null;
       powerDbm = null;
+      persistence = null;
       setTimeout(connect, 2000);
     };
 
@@ -441,16 +718,19 @@
       }
       else if (msg.type === "psd") {
         powerDbm = msg.power_dbm;
+        persistence = msg.persistence || null;
         peakFreqMhz = msg.peak_freq_mhz;
         peakPowerDbm = msg.peak_power_dbm;
         noiseFloorDbm = msg.noise_floor_dbm;
         frameCount = msg.frame;
 
-        // Update detections
         detections = msg.detections || [];
         if (msg.detection_count !== undefined) {
           detectionCount = msg.detection_count;
         }
+
+        // Push new row into waterfall buffer
+        pushWaterfallRow();
 
         // Update status bar
         peakInfoEl.textContent =
@@ -458,6 +738,16 @@
         noiseInfoEl.textContent = noiseFloorDbm.toFixed(1) + " dBm";
         frameInfoEl.textContent = frameCount;
         detInfoEl.textContent = detectionCount;
+
+        // Max persistence
+        if (persistence) {
+          var maxP = 0;
+          for (var pi = 0; pi < persistence.length; pi++) {
+            if (persistence[pi] > maxP) maxP = persistence[pi];
+          }
+          persistInfoEl.textContent = (maxP * 100).toFixed(0) + "%";
+          persistInfoEl.style.color = maxP > PERSIST_ALERT_THRESHOLD ? "#ff8800" : "#00ff88";
+        }
       }
     };
   }

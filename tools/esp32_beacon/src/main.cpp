@@ -7,12 +7,13 @@
  *
  * Test profiles:
  *   CONTINUOUS  — fixed channel, beacon every 100ms (baseline detection)
+ *   FLOOD       — blast broadcast packets nonstop (~90% duty cycle, simulates drone video)
  *   BURST       — on/off duty cycle (tests tripwire duration gating)
  *   POWER_RAMP  — sweep TX power 2–20 dBm (tests SNR sensitivity)
  *   FHSS        — hop through channels (tests multi-freq detection)
  *
  * Serial commands (115200 baud):
- *   PROFILE <CONTINUOUS|BURST|POWER_RAMP|FHSS>
+ *   PROFILE <CONTINUOUS|FLOOD|BURST|POWER_RAMP|FHSS>
  *   CHANNEL <1-14>
  *   POWER <2-20>    (dBm)
  *   START
@@ -27,6 +28,7 @@
 
 #include <Arduino.h>
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #include <esp_wifi.h>
 
 // ---------------------------------------------------------------------------
@@ -52,19 +54,24 @@ static const int CMD_BUF_SIZE = 64;
 
 enum Profile {
     PROFILE_CONTINUOUS,
+    PROFILE_FLOOD,
     PROFILE_BURST,
     PROFILE_POWER_RAMP,
     PROFILE_FHSS,
+    PROFILE_COUNT,
 };
 
 static const char* profile_names[] = {
-    "CONTINUOUS", "BURST", "POWER_RAMP", "FHSS"
+    "CONTINUOUS", "FLOOD", "BURST", "POWER_RAMP", "FHSS"
 };
 
 // SSID prefix tags per profile (for easy identification in spectrum)
 static const char* profile_ssid_tags[] = {
-    "CONT", "BURST", "RAMP", "FHSS"
+    "CONT", "FLOOD", "BURST", "RAMP", "FHSS"
 };
+
+// FLOOD profile: broadcast packet payload (250 bytes of data per packet)
+static const int FLOOD_PACKET_SIZE = 250;
 
 // BURST profile timing (ms)
 static const unsigned long BURST_ON_MS  = 500;
@@ -160,6 +167,42 @@ static void handle_continuous() {
     digitalWrite(LED_PIN, HIGH);
 }
 
+static void handle_flood() {
+    // Blast broadcast UDP packets as fast as possible.
+    // This keeps the WiFi radio transmitting near-continuously (~90% duty cycle),
+    // simulating a high-throughput drone video downlink.
+    static WiFiUDP udp;
+    static bool udp_started = false;
+    static uint8_t payload[FLOOD_PACKET_SIZE];
+    static uint32_t seq = 0;
+
+    if (!udp_started) {
+        udp.begin(12345);
+        // Fill payload with recognizable pattern
+        for (int i = 0; i < FLOOD_PACKET_SIZE; i++) {
+            payload[i] = (uint8_t)(i & 0xFF);
+        }
+        udp_started = true;
+    }
+
+    digitalWrite(LED_PIN, HIGH);
+
+    // Send a burst of broadcast packets per loop iteration
+    // Broadcast to 255.255.255.255 so no association needed
+    for (int i = 0; i < 20; i++) {
+        // Stamp sequence number into first 4 bytes
+        payload[0] = (seq >> 24) & 0xFF;
+        payload[1] = (seq >> 16) & 0xFF;
+        payload[2] = (seq >> 8) & 0xFF;
+        payload[3] = seq & 0xFF;
+
+        udp.beginPacket(IPAddress(255, 255, 255, 255), 12345);
+        udp.write(payload, FLOOD_PACKET_SIZE);
+        udp.endPacket();
+        seq++;
+    }
+}
+
 static void handle_burst() {
     unsigned long now = millis();
     unsigned long elapsed = now - phase_start_ms;
@@ -236,7 +279,7 @@ static void process_command(const char* cmd) {
         while (*name == ' ') name++;
 
         bool found = false;
-        for (int i = 0; i < 4; i++) {
+        for (int i = 0; i < PROFILE_COUNT; i++) {
             if (strcasecmp(name, profile_names[i]) == 0) {
                 current_profile = (Profile)i;
                 found = true;
@@ -360,6 +403,9 @@ void loop() {
     switch (current_profile) {
         case PROFILE_CONTINUOUS:
             handle_continuous();
+            break;
+        case PROFILE_FLOOD:
+            handle_flood();
             break;
         case PROFILE_BURST:
             handle_burst();

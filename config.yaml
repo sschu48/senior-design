@@ -14,10 +14,10 @@ sdr:
 
   rx_a:                                  # Omni tripwire channel
     antenna: "RX2"                       # B210 antenna port
-    center_freq_hz: 2.437e9              # WiFi Ch 6 — RemoteID default
+    center_freq_hz: 2.412e9              # WiFi Ch 1 — testing
     sample_rate_hz: 30.72e6              # MIMO max per channel
     bandwidth_hz: 30.72e6
-    gain_db: 40                          # RX gain (0-76 dB on B210)
+    gain_db: 30                          # RX gain (0-76 dB on B210)
     agc: false
 
   rx_b:                                  # Yagi directional channel
@@ -29,8 +29,8 @@ sdr:
     agc: false
 
 dsp:
-  fft_size: 2048                         # FFT points for PSD
-  window: "hann"                         # hann, hamming, blackman
+  fft_size: 8192                         # FFT points for PSD
+  window: "hamming"                      # hann, hamming, blackman
   overlap: 0.5                           # 50% overlap for Welch
   dc_offset_window: 1024                 # samples for DC removal
 

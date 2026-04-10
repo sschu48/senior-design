@@ -18,6 +18,7 @@ import numpy as np
 from aiohttp import web
 
 from src.dsp.detector import Detection, create_detectors
+from src.dsp.persistence import PersistenceDetector
 from src.dsp.spectrum import compute_psd_from_config
 
 if TYPE_CHECKING:
@@ -57,9 +58,10 @@ class DashboardServer:
     _clients: set[web.WebSocketResponse] = field(default_factory=set, init=False, repr=False)
     _frame_count: int = field(default=0, init=False, repr=False)
     _freq_mhz: list[float] = field(default_factory=list, init=False, repr=False)
-    _tripwire: TripwireDetector | None = field(default=None, init=False, repr=False)
-    _cfar: CFARDetector | None = field(default=None, init=False, repr=False)
+    _tripwire: object | None = field(default=None, init=False, repr=False)
+    _cfar: object | None = field(default=None, init=False, repr=False)
     _detection_count: int = field(default=0, init=False, repr=False)
+    _persistence: PersistenceDetector | None = field(default=None, init=False, repr=False)
 
     async def start(self) -> None:
         """Start the IQ source, aiohttp app, and broadcast loop."""
@@ -69,6 +71,14 @@ class DashboardServer:
         iq = await self.source.read(self.config.dsp.fft_size)
         freq_hz, _ = compute_psd_from_config(iq, self.config)
         self._freq_mhz = (freq_hz / 1e6).tolist()
+
+        # Initialize persistence detector (always on)
+        # window_frames=60 at 15fps = 4 seconds of history
+        self._persistence = PersistenceDetector(
+            num_bins=self.config.dsp.fft_size,
+            window_frames=self.fps * 4,
+            threshold_db=6.0,
+        )
 
         # Initialize detectors if enabled
         if self.enable_detections:
@@ -153,9 +163,13 @@ class DashboardServer:
             peak_power_dbm = float(power_dbm[peak_idx])
             noise_floor_dbm = float(np.median(power_dbm))
 
+            # Update persistence detector
+            persistence = self._persistence.update(power_dbm)
+
             msg_data: dict = {
                 "type": "psd",
                 "power_dbm": np.round(power_dbm, 2).tolist(),
+                "persistence": np.round(persistence, 3).tolist(),
                 "frame": self._frame_count,
                 "peak_freq_mhz": round(peak_freq_mhz, 3),
                 "peak_power_dbm": round(peak_power_dbm, 1),
