@@ -41,9 +41,9 @@ class TestLoadConfig:
         cfg = load_config()
         rx = cfg.sdr.rx_a
         assert isinstance(rx, RxChannelConfig)
-        assert rx.center_freq_hz == 2.437e9
+        assert rx.center_freq_hz == 2.412e9
         assert rx.sample_rate_hz == 30.72e6
-        assert rx.gain_db == 40
+        assert rx.gain_db == 30
         assert rx.agc is False
 
     def test_rx_b_channel(self):
@@ -55,8 +55,8 @@ class TestLoadConfig:
     def test_dsp_fields(self):
         cfg = load_config()
         assert isinstance(cfg.dsp, DSPConfig)
-        assert cfg.dsp.fft_size == 2048
-        assert cfg.dsp.window == "hann"
+        assert cfg.dsp.fft_size == 8192
+        assert cfg.dsp.window == "hamming"
         assert cfg.dsp.overlap == 0.5
         assert cfg.dsp.dc_offset_window == 1024
 

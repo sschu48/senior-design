@@ -71,24 +71,35 @@ make help              Show all targets
 | [DEVELOPMENT.md](docs/DEVELOPMENT.md) | Module architecture, data flow, how to extend the system |
 | [TESTING.md](docs/TESTING.md) | Test strategy, writing tests, field test protocol |
 | [architecture.md](docs/architecture.md) | Full system design, link budget, DB schema, block diagrams |
+| [phase-1-5-rf-validation.md](docs/phase-1-5-rf-validation.md) | Current measurement-first validation plan and checkpoint |
+| [hardware/hackrf-bench-setup.md](docs/hardware/hackrf-bench-setup.md) | Pi/HackRF transmitter vs B210 receiver bench setup |
 | [linux-setup.md](docs/linux-setup.md) | Ubuntu setup, B210 verification, troubleshooting |
+| [rf-research/rf-primer-for-sentinel.md](docs/rf-research/rf-primer-for-sentinel.md) | RF fundamentals, link-budget intuition, and research reading list |
 | [rf-research/drone-emissions.md](docs/rf-research/drone-emissions.md) | Protocol profiles, clutter analysis, references |
 | [hardware/b210-notes.md](docs/hardware/b210-notes.md) | USRP B210 configuration, MIMO limits, input protection |
 | [CLAUDE.md](CLAUDE.md) | AI development guide, coding rules, decision rules |
 
 ## Current Status
 
-**Phase 1 (Foundation)** — core pipeline operational, preparing for field testing.
+**Phase 1 (Foundation)** — synthetic dual-RX pipeline operational.
+
+**Phase 1.5 (RF validation)** — active next phase before drone-classifier claims.
 
 | Component | Status |
 |---|---|
-| SDR capture (synthetic + USRP B210) | Done |
+| SDR capture (synthetic + USRP B210) | Done for single RX; dual RX built, hardware validation pending |
 | PSD computation (Welch) | Done |
 | TripwireDetector (adaptive noise floor) | Done |
 | CFARDetector (CA-CFAR) | Done |
 | Antenna controller (simulated) | Done |
-| Pipeline engine (async) | Done |
+| Pipeline engine (async) | Done for single RX; dual-RX engine built |
+| RFEvent contracts + lightweight tracking | Done |
 | Config system (frozen dataclasses) | Done |
+| Dual-RX bench calibration | Next |
+| HackRF bench test environment | Built; hardware run pending |
+| Yagi antenna pattern calibration | Next |
+| RF survey mode | Next |
+| IQ replay artifacts | Partial |
 | RemoteID / DJI DroneID decoders | Not started |
 | Real antenna hardware control | Not started |
 | Radar app ↔ pipeline WebSocket | Not started |

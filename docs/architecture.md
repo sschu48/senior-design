@@ -480,16 +480,42 @@ Frontend → REST API → DSP Pipeline
 
 ---
 
-## Phase 1 Deliverables (Current)
+## Phase Status
 
-1. **SDR capture pipeline** — B210 dual-channel IQ streaming via UHD
-2. **Basic FFT detection** — PSD computation, energy threshold on omni path
-3. **CFAR detection** — CA-CFAR on yagi path
-4. **RemoteID decoder** — WiFi beacon frame extraction + opendroneid decode
-5. **DJI DroneID decoder** — OFDM burst detection + payload decode
-6. **Antenna control scaffold** — servo/stepper azimuth control, SCAN/CUE/TRACK modes
-7. **Config system** — config.yaml with all hardware parameters
-8. **Radar app integration** — live detection events pushed to existing frontend
+### Phase 1 Foundation
+
+Current state:
+
+1. **SDR capture pipeline** - single-RX synthetic/USRP path exists; dual-RX
+   synthetic and USRP scaffolds are built.
+2. **Basic FFT detection** - PSD computation and energy tripwire exist.
+3. **CFAR detection** - CA-CFAR runs on the Yagi path.
+4. **Antenna control scaffold** - simulated SCAN/CUE/TRACK behavior exists.
+5. **Config system** - `config.yaml` drives hardware and DSP parameters.
+6. **RF event contracts** - IQ, PSD, event, track, and verdict objects exist.
+
+Not complete:
+
+1. **RemoteID decoder integration** - not started.
+2. **DJI DroneID decoder integration** - not started.
+3. **Radar app integration** - not started.
+4. **Real antenna hardware control** - not started.
+
+### Phase 1.5 RF Validation
+
+Active next phase before Phase 2 classifier work. The objective is to validate
+the physical receive chain before making drone identity claims.
+
+Required evidence gates:
+
+1. Bench-validate B210 dual-RX channel agreement.
+2. Measure noise floor and safe gain/attenuation settings.
+3. Calibrate Yagi RSSI/SNR vs azimuth.
+4. Add replayable IQ + metadata artifacts.
+5. Add RF survey mode for local 2.4 GHz clutter mapping.
+
+Detailed checkpoint:
+[phase-1-5-rf-validation.md](phase-1-5-rf-validation.md)
 
 ---
 

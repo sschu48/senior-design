@@ -3,8 +3,9 @@
 import pytest
 
 from src.antenna.controller import ScanMode, SimulatedController
-from src.pipeline.engine import PipelineEngine
-from src.sdr.capture import SignalDef, SyntheticSource
+from src.pipeline.contracts import ChannelRole
+from src.pipeline.engine import DualPipelineEngine, PipelineEngine
+from src.sdr.capture import SignalDef, SyntheticDualSource, SyntheticSource
 from src.sdr.config import (
     AntennaConfig,
     CaptureConfig,
@@ -110,6 +111,21 @@ def make_source(signals=None, noise_dbm=-90.0, seed=0):
         noise_power_dbm=noise_dbm,
         signals=signals or [],
         seed=seed,
+    )
+
+
+def make_dual_source(omni_signals=None, yagi_signals=None, noise_dbm=-90.0, seed=0):
+    """Create a SyntheticDualSource with optional per-channel signals."""
+    return SyntheticDualSource(
+        sample_rate_hz=30.72e6,
+        center_freq_hz=2.437e9,
+        omni_noise_power_dbm=noise_dbm,
+        yagi_noise_power_dbm=noise_dbm,
+        omni_signals=omni_signals or [],
+        yagi_signals=yagi_signals or [],
+        seed=seed,
+        azimuth_deg=90.0,
+        elevation_deg=10.0,
     )
 
 
@@ -268,3 +284,73 @@ class TestAntennaIntegration:
         await engine.stop()
 
         assert engine.frame_count == 10
+
+
+# ===========================================================================
+# Dual-RX pipeline
+# ===========================================================================
+
+class TestDualPipeline:
+    """Dual pipeline should keep omni and Yagi paths separate."""
+
+    async def test_processes_dual_frame(self):
+        cfg = make_test_config()
+        source = make_dual_source(seed=10)
+        engine = DualPipelineEngine(config=cfg, source=source)
+
+        await engine.start()
+        result = await engine.process_one_frame()
+        await engine.stop()
+
+        assert engine.frame_count == 1
+        assert result.frame.rx_a.role == ChannelRole.OMNI
+        assert result.frame.rx_b.role == ChannelRole.YAGI
+        assert result.omni_psd.role == ChannelRole.OMNI
+        assert result.yagi_psd.role == ChannelRole.YAGI
+
+    async def test_yagi_detection_uses_cfar_path(self):
+        cfg = make_test_config()
+        source = make_dual_source(
+            yagi_signals=[
+                SignalDef(freq_offset_hz=5e6, power_dbm=-50.0, signal_type="tone"),
+            ],
+            noise_dbm=-90.0,
+            seed=11,
+        )
+        engine = DualPipelineEngine(config=cfg, source=source)
+
+        await engine.start()
+        result = None
+        for _ in range(10):
+            result = await engine.process_one_frame()
+            if result.cfar_detections:
+                break
+        await engine.stop()
+
+        assert result is not None
+        assert len(result.cfar_detections) > 0
+        assert any(event.role == ChannelRole.YAGI for event in result.rf_events)
+        assert any(event.source == "cfar" for event in result.rf_events)
+        assert engine.detection_count > 0
+
+    async def test_dual_pipeline_tracks_yagi_events(self):
+        cfg = make_test_config()
+        source = make_dual_source(
+            yagi_signals=[
+                SignalDef(freq_offset_hz=5e6, power_dbm=-50.0, signal_type="tone"),
+            ],
+            noise_dbm=-90.0,
+            seed=12,
+        )
+        engine = DualPipelineEngine(config=cfg, source=source)
+
+        await engine.start()
+        result = None
+        for _ in range(5):
+            result = await engine.process_one_frame()
+        await engine.stop()
+
+        assert result is not None
+        assert len(result.tracks) >= 1
+        assert result.tracks[0].latest_event.role == ChannelRole.YAGI
+        assert result.tracks[0].confidence > 0

@@ -19,8 +19,8 @@ import sys
 import time
 
 from src.antenna.controller import SimulatedController
-from src.pipeline.engine import PipelineEngine
-from src.sdr.capture import SyntheticSource, USRPSource
+from src.pipeline.engine import DualPipelineEngine, PipelineEngine
+from src.sdr.capture import SyntheticDualSource, SyntheticSource, USRPDualSource, USRPSource
 from src.sdr.config import load_config
 from src.sdr.signals import DEFAULT_SIGNALS
 
@@ -31,6 +31,21 @@ def build_source(config) -> SyntheticSource:
         sample_rate_hz=config.sdr.rx_a.sample_rate_hz,
         noise_power_dbm=-90.0,
         signals=DEFAULT_SIGNALS,
+        seed=42,
+    )
+
+
+def build_dual_source(config) -> SyntheticDualSource:
+    """Create a SyntheticDualSource with matched omni/Yagi drone-like signals."""
+    return SyntheticDualSource(
+        sample_rate_hz=config.sdr.rx_a.sample_rate_hz,
+        center_freq_hz=config.sdr.rx_a.center_freq_hz,
+        omni_center_freq_hz=config.sdr.rx_a.center_freq_hz,
+        yagi_center_freq_hz=config.sdr.rx_b.center_freq_hz,
+        omni_noise_power_dbm=-90.0,
+        yagi_noise_power_dbm=-90.0,
+        omni_signals=DEFAULT_SIGNALS,
+        yagi_signals=DEFAULT_SIGNALS,
         seed=42,
     )
 
@@ -76,7 +91,7 @@ def _synthetic_config_overrides(config):
     mode we process frames back-to-back, so we use:
     - Faster noise floor convergence (0.5s window vs 10s)
     - Lower tripwire trigger duration (10ms vs 50ms)
-    - Lower CFAR min BW (30kHz vs 100kHz) — tones are valid test signals
+    - Lower CFAR min BW (10kHz vs 100kHz) — tones are valid smoke-test signals
     """
     dsp = config.dsp
     new_tripwire = dataclasses.replace(
@@ -86,7 +101,7 @@ def _synthetic_config_overrides(config):
     )
     new_cfar = dataclasses.replace(
         dsp.cfar,
-        min_detection_bw_hz=30e3,
+        min_detection_bw_hz=10e3,
     )
     new_dsp = dataclasses.replace(dsp, tripwire=new_tripwire, cfar=new_cfar)
     return dataclasses.replace(config, dsp=new_dsp)
@@ -98,11 +113,21 @@ async def run_pipeline(
     headless: bool,
     live: bool = False,
     device_args: str = "",
+    dual: bool = False,
 ) -> None:
     """Run the detection pipeline."""
     config = load_config(config_path)
 
-    if live:
+    if live and dual:
+        setup_logging(config.system.log_level)
+        source = USRPDualSource(
+            rx_a_config=config.sdr.rx_a,
+            rx_b_config=config.sdr.rx_b,
+            device_args=device_args,
+        )
+        mode_label = "LIVE DUAL RX (USRP B210)"
+        signal_label = f"device={device_args or 'auto-detect'}"
+    elif live:
         # Live mode: use production config, USRP hardware source
         setup_logging(config.system.log_level)
         source = USRPSource(
@@ -112,6 +137,12 @@ async def run_pipeline(
         )
         mode_label = "LIVE (USRP B210)"
         signal_label = f"device={device_args or 'auto-detect'}"
+    elif dual:
+        config = _synthetic_config_overrides(config)
+        setup_logging(config.system.log_level)
+        source = build_dual_source(config)
+        mode_label = "Synthetic Dual RX"
+        signal_label = "matched omni/yagi DJI wideband, RC tone, ELRS narrowband"
     else:
         # Synthetic mode: override config for fast convergence
         config = _synthetic_config_overrides(config)
@@ -121,7 +152,10 @@ async def run_pipeline(
         signal_label = "DJI wideband, RC tone, ELRS narrowband"
 
     antenna = build_antenna(config)
-    engine = PipelineEngine(config=config, source=source, antenna=antenna)
+    if dual:
+        engine = DualPipelineEngine(config=config, source=source, antenna=antenna)
+    else:
+        engine = PipelineEngine(config=config, source=source, antenna=antenna)
 
     print("=" * 60)
     print(f"SENTINEL — Detection Pipeline ({mode_label})")
@@ -130,6 +164,7 @@ async def run_pipeline(
     print(f"  Center freq:  {config.sdr.rx_a.center_freq_hz / 1e9:.3f} GHz")
     print(f"  FFT size:     {config.dsp.fft_size}")
     print(f"  Signals:      {signal_label}")
+    print(f"  Dual RX:      {'yes' if dual else 'no'}")
     print(f"  Max frames:   {max_frames if max_frames > 0 else 'unlimited'}")
     print("=" * 60)
 
@@ -143,7 +178,10 @@ async def run_pipeline(
         else:
             # Run until interrupted
             while engine.running:
-                detections = await engine.process_one_frame()
+                result = await engine.process_one_frame()
+                detections = (
+                    result.all_detections if dual else result
+                )
 
                 if not headless and detections:
                     for d in detections:
@@ -181,10 +219,18 @@ def main() -> None:
     parser.add_argument("--frames", type=int, default=100, help="Max frames (0=unlimited)")
     parser.add_argument("--headless", action="store_true", help="Suppress per-detection output")
     parser.add_argument("--live", action="store_true", help="Use USRP B210 hardware instead of synthetic source")
+    parser.add_argument("--dual", action="store_true", help="Use dual-RX omni/Yagi pipeline")
     parser.add_argument("--device", default="", help="UHD device args (e.g. serial=31E345B)")
     args = parser.parse_args()
 
-    asyncio.run(run_pipeline(args.config, args.frames, args.headless, args.live, args.device))
+    asyncio.run(run_pipeline(
+        args.config,
+        args.frames,
+        args.headless,
+        args.live,
+        args.device,
+        args.dual,
+    ))
 
 
 if __name__ == "__main__":

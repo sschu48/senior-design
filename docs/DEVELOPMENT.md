@@ -12,20 +12,89 @@ src/
 │
 ├── dsp/
 │   ├── spectrum.py     Welch PSD: IQ → (freq_hz[], power_dbm[])
-│   └── detector.py     TripwireDetector, CFARDetector → Detection[]
+│   ├── detector.py     TripwireDetector, CFARDetector → Detection[]
+│   └── events.py       Detection → RFEvent conversion + lightweight tracking
 │
 ├── antenna/
 │   └── controller.py   AntennaController ABC → SimulatedController
 │                        ScanMode: IDLE → SCAN → CUE → TRACK
 │
 ├── pipeline/
+│   ├── contracts.py    Shared IQ, PSD, RF event, track, and verdict contracts
 │   └── engine.py       PipelineEngine: wires everything into async loop
 │
 └── ui/
     └── spectrum.py     Live matplotlib PSD display
 ```
 
+## Current Path
+
+As of 2026-04-29, SENTINEL is moving from Phase 1 foundation into
+Phase 1.5 RF validation. The code can run a synthetic dual-RX pipeline, but
+live dual-channel hardware behavior, antenna pattern, and local RF clutter have
+not been measured yet.
+
+Current decision: do not treat raw 2.4 GHz energy as a drone answer key. The
+system should first produce repeatable RF evidence: channel agreement, noise
+floor, calibrated Yagi response, saved IQ, replayable detections, and local
+survey logs. The detailed checkpoint is tracked in
+[phase-1-5-rf-validation.md](phase-1-5-rf-validation.md).
+
 ## Data Flow
+
+The Phase 0 upgrade path is contract-first.  Later dual-RX and classifier work
+should exchange these objects instead of raw tuples:
+
+```
+IQChannelFrame
+    One channel of complex64 IQ plus role, channel index, timing, RF tuning,
+    and antenna pointing context.
+
+DualIQFrame
+    Paired RX-A/RX-B frame. RX-A is the omni tripwire channel, RX-B is the
+    Yagi channel.
+
+PSDFrame
+    One channel spectrum with frequency axis, dBm/bin power, timing, and
+    antenna context.
+
+RFEvent
+    A time-frequency object built from detector hits. This is where burst
+    cadence, duty cycle, hop rate, persistence, and bearing evidence attach.
+
+TrackedEmitter
+    A sequence of RFEvent objects believed to come from one emitter.
+
+DetectionVerdict
+    Final multi-evidence label: DRONE_CONFIRMED, DRONE_LIKELY, UNKNOWN_RF,
+    or CLUTTER.
+```
+
+Target dual-channel flow:
+
+```
+USRP B210 MIMO
+    │
+    ▼
+DualIQFrame
+    ├── RX-A omni IQ  → PSDFrame → TripwireDetector
+    └── RX-B yagi IQ  → PSDFrame → CFARDetector → RFEvent tracker
+                                                   │
+                         antenna azimuth/elevation ┘
+    ▼
+TrackedEmitter → DetectionVerdict → log/UI/capture
+```
+
+Initial RF safety assumptions for live use:
+
+- RX-A and RX-B should share one center frequency until B210 tuning behavior is
+  validated for the specific hardware mode.
+- The high-gain Yagi path needs a limiter or switchable attenuation before
+  field operation near unknown 2.4 GHz emitters.
+- Raw IQ capture should stay enabled for suspicious events so UNKNOWN_RF can be
+  reviewed and turned into labeled test data.
+
+## Current Data Flow
 
 Every processing frame follows this path:
 

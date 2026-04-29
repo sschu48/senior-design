@@ -7,7 +7,7 @@ Run with: make test-hardware
 import numpy as np
 import pytest
 
-from src.sdr.capture import USRPSource
+from src.sdr.capture import USRPDualSource, USRPSource
 from src.sdr.config import RxChannelConfig
 
 
@@ -51,6 +51,31 @@ class TestUSRPSourceFields:
     async def test_read_before_start_raises(self):
         cfg = make_rx_config()
         source = USRPSource(channel_config=cfg)
+        with pytest.raises(RuntimeError, match="not started"):
+            await source.read(1024)
+
+
+class TestUSRPDualSourceFields:
+    """Verify dual-source construction without touching hardware."""
+
+    def test_fields_set(self):
+        rx_a = make_rx_config()
+        rx_b = make_rx_config()
+        source = USRPDualSource(
+            rx_a_config=rx_a,
+            rx_b_config=rx_b,
+            device_args="serial=ABC",
+            channels=(0, 1),
+        )
+
+        assert source.rx_a_config is rx_a
+        assert source.rx_b_config is rx_b
+        assert source.device_args == "serial=ABC"
+        assert source.channels == (0, 1)
+
+    async def test_read_before_start_raises(self):
+        cfg = make_rx_config()
+        source = USRPDualSource(rx_a_config=cfg, rx_b_config=cfg)
         with pytest.raises(RuntimeError, match="not started"):
             await source.read(1024)
 

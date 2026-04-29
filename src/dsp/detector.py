@@ -397,8 +397,9 @@ def create_detectors(
     across the pipeline engine, dashboard server, and bench test.
     """
     dsp = config.dsp
-    rx = config.sdr.rx_a
-    frames_per_sec = rx.sample_rate_hz / dsp.fft_size
+    rx_tripwire = config.sdr.rx_a
+    rx_cfar = config.sdr.rx_b
+    frames_per_sec = rx_tripwire.sample_rate_hz / dsp.fft_size
 
     tw = dsp.tripwire
     noise_floor_frames = max(2, int(tw.noise_floor_window_sec * frames_per_sec))
@@ -410,8 +411,8 @@ def create_detectors(
         threshold_db=tw.threshold_db,
         noise_floor_frames=noise_floor_frames,
         min_trigger_frames=min_trigger_frames,
-        sample_rate_hz=rx.sample_rate_hz,
-        center_freq_hz=rx.center_freq_hz,
+        sample_rate_hz=rx_tripwire.sample_rate_hz,
+        center_freq_hz=rx_tripwire.center_freq_hz,
         fft_size=dsp.fft_size,
     )
 
@@ -421,8 +422,8 @@ def create_detectors(
         reference_cells=cf.reference_cells,
         threshold_factor_db=cf.threshold_factor_db,
         min_detection_bw_hz=cf.min_detection_bw_hz,
-        sample_rate_hz=rx.sample_rate_hz,
-        center_freq_hz=rx.center_freq_hz,
+        sample_rate_hz=rx_cfar.sample_rate_hz,
+        center_freq_hz=rx_cfar.center_freq_hz,
         fft_size=dsp.fft_size,
     )
 
