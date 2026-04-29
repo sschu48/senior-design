@@ -10,7 +10,11 @@ venv/
 
 # IQ captures (large binary files)
 *.cf32
+*.cs8
 *.sigmf-data
+
+# HackRF TX synthesized IQ cache (regenerable)
+data/hackrf_tx_cache/
 
 # IDE
 .vscode/

@@ -9,7 +9,7 @@ PYTEST := $(VENV)/bin/pytest
 
 .DEFAULT_GOAL := help
 
-.PHONY: help venv test test-quick test-hardware run-pipeline run-pipeline-headless run-live run-live-headless spectrum spectrum-live dashboard dashboard-live dashboard-detect dashboard-detect-live bench-test bench-test-live setup clean clean-all
+.PHONY: help venv test test-quick test-hardware run-pipeline run-pipeline-headless run-live run-live-headless spectrum spectrum-live dashboard dashboard-live dashboard-detect dashboard-detect-live bench-test bench-test-live hackrf-tx hackrf-tx-list hackrf-tx-tone hackrf-tx-dryrun setup clean clean-all
 
 help: ## Show available targets
 	@echo "SENTINEL Development Commands"
@@ -69,6 +69,18 @@ bench-test: venv ## Bench test (synthetic baseline)
 
 bench-test-live: venv ## Bench test with USRP (gain=25, indoor safe)
 	$(PYTHON) -m tools.bench_test --live --gain 25
+
+hackrf-tx: venv ## Run HackRF dummy drone (default profile = DJI DroneID)
+	$(PYTHON) -m tools.hackrf_tx
+
+hackrf-tx-list: venv ## List available HackRF TX profiles
+	$(PYTHON) -m tools.hackrf_tx --list-profiles
+
+hackrf-tx-tone: venv ## Run HackRF with a CW tone at 2.437 GHz (smoke test)
+	$(PYTHON) -m tools.hackrf_tx --profile tone_2437
+
+hackrf-tx-dryrun: venv ## Generate IQ + show banner; no transmission
+	$(PYTHON) -m tools.hackrf_tx --dry-run
 
 setup: ## Run Ubuntu setup script
 	bash scripts/setup-ubuntu.sh

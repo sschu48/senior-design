@@ -109,3 +109,68 @@ server:
   host: "0.0.0.0"
   port: 3000
   websocket_path: "/ws"
+
+# ---------------------------------------------------------------------------
+# HackRF TX — "dummy drone" signal generator for bench/field testing.
+# Used by tools/hackrf_tx/. Independent of the main RX pipeline.
+#
+# SAFETY (no attenuator setup): TX power roughly tracks tx_vga_gain_db.
+# The runner refuses to enable enable_amp without the --allow-amp flag.
+# See tools/hackrf_tx/README.md for the link-budget and separation table.
+# ---------------------------------------------------------------------------
+hackrf_tx:
+  device_serial: ""                      # empty = auto-detect first HackRF
+  default_profile: "dji_droneid"         # which profile dummy_drone uses
+  tx_vga_gain_db: 20                     # 0-47, conservative default
+  enable_amp: false                      # +14 dB front-end amp, OFF by default
+  min_rx_separation_m: 3.0               # min distance from B210 RX antenna
+  cache_dir: "data/hackrf_tx_cache"      # synthesized .cs8 files land here
+
+  profiles:
+    # --- DJI DroneID mimic: 10 MHz OFDM burst every 600 ms ---
+    dji_droneid:
+      description: "DJI DroneID-style 10 MHz OFDM burst, 600ms cadence"
+      iq_source: "synth_ofdm_burst"      # synth_tone, synth_ofdm_burst, synth_ofdm_continuous, file
+      iq_file: ""                        # used when iq_source = file
+      center_freq_hz: 2.437e9            # WiFi Ch 6 — DroneID default
+      sample_rate_hz: 10.0e6             # HackRF: 2-20 MS/s
+      bandwidth_hz: 9.0e6                # synthesized signal width
+      burst_duration_s: 0.001            # 1 ms burst
+      period_s: 0.600                    # repeat every 600 ms
+      num_subcarriers: 600               # ~15 kHz per subcarrier (LTE-like)
+
+    # --- DJI OcuSync video downlink mimic: continuous 10 MHz OFDM ---
+    ocusync_video:
+      description: "OcuSync video-link mimic, continuous 10 MHz OFDM"
+      iq_source: "synth_ofdm_continuous"
+      iq_file: ""
+      center_freq_hz: 2.437e9
+      sample_rate_hz: 10.0e6
+      bandwidth_hz: 9.0e6
+      burst_duration_s: 0.100            # 100 ms file, looped via -R
+      period_s: 0.0                      # 0 = continuous (no silence)
+      num_subcarriers: 600
+
+    # --- Sanity-check tone at center frequency ---
+    tone_2437:
+      description: "Single CW tone at 2.437 GHz for pipeline smoke test"
+      iq_source: "synth_tone"
+      iq_file: ""
+      center_freq_hz: 2.437e9
+      sample_rate_hz: 2.0e6              # HackRF minimum
+      bandwidth_hz: 0.0
+      burst_duration_s: 0.010            # 10 ms file, looped
+      period_s: 0.0
+      num_subcarriers: 0                 # n/a for tone
+
+    # --- Replay a captured DJI/drone IQ file ---
+    replay_capture:
+      description: "Replay a recorded IQ capture (override iq_file via --iq)"
+      iq_source: "file"
+      iq_file: ""                        # set via --iq CLI flag
+      center_freq_hz: 2.437e9
+      sample_rate_hz: 10.0e6
+      bandwidth_hz: 0.0                  # n/a — defined by source file
+      burst_duration_s: 0.0              # 0 = use full file
+      period_s: 0.0                      # 0 = no padding (continuous loop)
+      num_subcarriers: 0                 # n/a for file replay

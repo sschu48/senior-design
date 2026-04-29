@@ -38,7 +38,13 @@ src/
   antenna/    Pan/tilt controller (SimulatedController)
   pipeline/   Async engine wiring source → PSD → detect → antenna → log
   ui/         Real-time spectrum analyzer (matplotlib)
-tools/        Pipeline runner, spectrum analyzer CLI
+tools/
+  esp32_beacon/   Cheap WiFi-beacon test transmitter (range/sensitivity sweeps)
+  hackrf_tx/      "Dummy drone" RF source: synthesizes DJI DroneID / OcuSync /
+                  CW tone, or replays captured IQ. See tools/hackrf_tx/README.md.
+  bench_test.py   Configurable bench harness (synthetic or USRP)
+  bench_snr_sweep.py  USRP gain/FFT/window sweep
+  sentinel_runner.py  Demo pipeline runner
 tests/unit/   60+ tests with synthetic IQ data
 config.yaml   All hardware/DSP parameters (zero hardcoded values)
 ```
@@ -53,7 +59,8 @@ make run-pipeline      Detection pipeline (synthetic data)
 make run-live          Detection pipeline (live USRP B210)
 make spectrum          Real-time spectrum analyzer (synthetic)
 make spectrum-live     Real-time spectrum analyzer (live B210)
-make run-radar         Start Express+Socket.IO radar app
+make hackrf-tx         Dummy drone TX (HackRF, default DJI DroneID profile)
+make hackrf-tx-list    List available HackRF TX profiles
 make help              Show all targets
 ```
 
