@@ -141,6 +141,42 @@ class TestProcessFrame:
         assert ScanMode.BEARING_SEARCH in modes_seen, modes_seen
 
 
+class TestOmniOnly:
+    def test_omni_only_skips_antenna_and_emits_bearingless_events(self):
+        cfg = make_v2_test_config()
+        wifi = SignalDef(
+            freq_offset_hz=0.0,
+            bandwidth_hz=20e6,
+            power_dbm=-40.0,
+            signal_type="wideband",
+            num_subcarriers=64,
+        )
+        source = _make_source(signals=[wifi])
+        # antenna=None proves omni-only doesn't need one.
+        pipe = Pipeline(config=cfg, source=source, omni_only=True)
+
+        async def run():
+            await pipe.start()
+            results = []
+            for _ in range(8):
+                results.append(await pipe.process_one_frame())
+            quiet = _make_source()
+            await source.stop()
+            pipe.source_stage.source = quiet
+            await quiet.start()
+            for _ in range(3):
+                results.append(await pipe.process_one_frame())
+            await quiet.stop()
+            return results
+
+        results = asyncio.run(run())
+        events = [ev for r in results for ev in r.events]
+        assert events, "omni-only pipeline must emit events on a strong signal"
+        # Bearings are never produced in omni-only mode.
+        assert all(not r.bearings for r in results)
+        assert all(ev.bearing_deg is None for ev in events)
+
+
 class TestCounters:
     def test_frame_count_advances(self):
         cfg = make_v2_test_config()

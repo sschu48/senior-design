@@ -55,45 +55,53 @@ class FuseStage(Stage[FuseRequest, tuple[RFEvent, ...]]):
                 # shouldn't happen given the pipeline order, but the
                 # contract is "events require both", so we honor that.
                 continue
-            events.append(self._build_event(cls, bearing, request))
+            events.append(
+                build_rf_event(cls, frame_index=request.frame_index, bearing=bearing)
+            )
         return tuple(events)
 
-    # ---- internals ------------------------------------------------------
 
-    def _build_event(
-        self,
-        cls: Classification,
-        bearing: BearingEstimate,
-        request: FuseRequest,
-    ) -> RFEvent:
-        cand = cls.candidate
-        peak_burst = _peak_burst(cand)
-        return RFEvent(
-            event_id=f"evt-{request.frame_index}-{cand.candidate_id}",
-            role=cand.role,
-            start_time_s=cand.start_time_s,
-            end_time_s=cand.end_time_s,
-            center_freq_hz=cand.center_freq_hz,
-            bandwidth_hz=cand.bandwidth_hz,
-            peak_power_dbm=peak_burst.peak_power_dbm,
-            snr_db=peak_burst.snr_db,
-            family=cls.protocol,
-            source="v2-pipeline",
-            bin_start=peak_burst.bin_start,
-            bin_end=peak_burst.bin_end,
-            bearing_deg=bearing.bearing_deg,
-            duty_cycle=cand.duty_cycle,
-            hop_rate_hz=cand.hop_rate_hz,
-            supporting_frames=peak_burst.frame_end_index
-            - peak_burst.frame_start_index
-            + 1,
-            features={
-                "classifier_confidence": cls.confidence,
-                "classifier_reasons": list(cls.reasons),
-                "bearing_confidence": bearing.confidence,
-                "bearing_peak_power_dbm": bearing.peak_power_dbm,
-            },
-        )
+def build_rf_event(
+    cls: Classification,
+    *,
+    frame_index: int,
+    bearing: BearingEstimate | None = None,
+) -> RFEvent:
+    """Build an RFEvent from a Classification, optionally joining a bearing.
+
+    Used by FuseStage in dual-RX mode and by the omni-only pipeline path,
+    which has no bearing to attach.
+    """
+    cand = cls.candidate
+    peak_burst = _peak_burst(cand)
+    features: dict[str, object] = {
+        "classifier_confidence": cls.confidence,
+        "classifier_reasons": list(cls.reasons),
+    }
+    if bearing is not None:
+        features["bearing_confidence"] = bearing.confidence
+        features["bearing_peak_power_dbm"] = bearing.peak_power_dbm
+    return RFEvent(
+        event_id=f"evt-{frame_index}-{cand.candidate_id}",
+        role=cand.role,
+        start_time_s=cand.start_time_s,
+        end_time_s=cand.end_time_s,
+        center_freq_hz=cand.center_freq_hz,
+        bandwidth_hz=cand.bandwidth_hz,
+        peak_power_dbm=peak_burst.peak_power_dbm,
+        snr_db=peak_burst.snr_db,
+        family=cls.protocol,
+        source="v2-pipeline",
+        bin_start=peak_burst.bin_start,
+        bin_end=peak_burst.bin_end,
+        bearing_deg=bearing.bearing_deg if bearing is not None else None,
+        duty_cycle=cand.duty_cycle,
+        hop_rate_hz=cand.hop_rate_hz,
+        supporting_frames=peak_burst.frame_end_index
+        - peak_burst.frame_start_index
+        + 1,
+        features=features,
+    )
 
 
 def _peak_burst(candidate: Candidate) -> Burst:

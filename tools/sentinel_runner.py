@@ -97,6 +97,7 @@ async def run_pipeline(
     headless: bool,
     live: bool = False,
     device_args: str = "",
+    omni_only: bool = False,
 ) -> None:
     config = load_config(config_path)
 
@@ -116,8 +117,14 @@ async def run_pipeline(
         mode_label = "Synthetic Dual RX"
         signal_label = "DJI wideband, RC tone, ELRS narrowband"
 
-    antenna = build_antenna(config)
-    pipeline = Pipeline(config=config, source=source, antenna=antenna)
+    if omni_only:
+        mode_label = f"{mode_label} • OMNI-ONLY (tripwire)"
+        antenna = None
+    else:
+        antenna = build_antenna(config)
+    pipeline = Pipeline(
+        config=config, source=source, antenna=antenna, omni_only=omni_only
+    )
 
     print("=" * 60)
     print(f"SENTINEL — V2 Pipeline ({mode_label})")
@@ -140,9 +147,9 @@ async def run_pipeline(
             while pipeline.running:
                 result = await pipeline.process_one_frame()
                 if not headless and result.events:
-                    state = antenna.get_state()
+                    state = antenna.get_state() if antenna is not None else None
                     for ev in result.events:
-                        print(json.dumps({
+                        payload = {
                             "frame": pipeline.frame_count,
                             "freq_mhz": round(ev.center_freq_hz / 1e6, 2),
                             "bw_khz": round(ev.bandwidth_hz / 1e3, 1),
@@ -150,9 +157,11 @@ async def run_pipeline(
                             "snr_db": round(ev.snr_db, 1),
                             "family": ev.family.value,
                             "bearing_deg": ev.bearing_deg,
-                            "antenna_az": round(state.azimuth_deg, 1),
-                            "antenna_mode": state.mode.value,
-                        }))
+                        }
+                        if state is not None:
+                            payload["antenna_az"] = round(state.azimuth_deg, 1)
+                            payload["antenna_mode"] = state.mode.value
+                        print(json.dumps(payload))
                 await asyncio.sleep(0)
     except KeyboardInterrupt:
         pass
@@ -176,6 +185,12 @@ def main() -> None:
     parser.add_argument("--headless", action="store_true", help="Suppress per-event output")
     parser.add_argument("--live", action="store_true", help="Use USRP B210 hardware")
     parser.add_argument("--device", default="", help="UHD device args")
+    parser.add_argument(
+        "--omni-only",
+        action="store_true",
+        help="Tripwire mode: skip antenna control + Yagi bearing stages, "
+             "emit events from the omni channel only (RX-A).",
+    )
     args = parser.parse_args()
 
     asyncio.run(run_pipeline(
@@ -184,6 +199,7 @@ def main() -> None:
         args.headless,
         args.live,
         args.device,
+        args.omni_only,
     ))
 
 

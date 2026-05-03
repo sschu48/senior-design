@@ -49,6 +49,7 @@ from src.pipeline.stages import (
     SpectrogramStage,
     TrackStage,
 )
+from src.pipeline.stages.fuse import build_rf_event
 from src.sdr.capture import DualIQSource
 from src.sdr.config import SentinelConfig
 
@@ -81,6 +82,7 @@ class Pipeline:
     config: SentinelConfig
     source: DualIQSource
     antenna: AntennaController | None = None
+    omni_only: bool = False
 
     source_stage: SourceStage = field(init=False, repr=False)
     spectrogram_stage: SpectrogramStage = field(init=False, repr=False)
@@ -182,6 +184,11 @@ class Pipeline:
         classifications = await self.classify_stage.process(candidates)
         await self.classify_stage.emit(classifications)
 
+        if self.omni_only:
+            return await self._finish_omni_only(
+                iq_frame, dual_spec, bursts, candidates, classifications
+            )
+
         # 6. Tick antenna and decide whether to enter BEARING_SEARCH.
         now = time.monotonic()
         dt = now - self._last_tick_time
@@ -254,6 +261,55 @@ class Pipeline:
             await asyncio.sleep(0)
 
     # ---- internals ------------------------------------------------------
+
+    async def _finish_omni_only(
+        self,
+        iq_frame: DualIQFrame,
+        dual_spec: DualSpectrogramFrame,
+        bursts: tuple[Burst, ...],
+        candidates: tuple[Candidate, ...],
+        classifications: tuple[Classification, ...],
+    ) -> PipelineFrameResult:
+        """Tripwire-only completion: skip antenna/bearing/fuse, build events directly.
+
+        Used when only the omni is connected. Each actionable classification
+        becomes an RFEvent with bearing_deg=None; tracks are still maintained
+        so repeated detections at the same frequency cluster into one emitter.
+        """
+        actionable = tuple(
+            cls
+            for cls in classifications
+            if cls.protocol != SignalFamily.UNKNOWN
+            and cls.confidence >= self.config.detection.min_confidence
+        )
+        events = tuple(
+            build_rf_event(cls, frame_index=iq_frame.frame_index)
+            for cls in actionable
+        )
+        bearings: tuple[BearingEstimate, ...] = ()
+
+        # Emit on the same channels so dashboards/loggers see a uniform stream.
+        await self.bearing_stage.emit(bearings)
+        await self.fuse_stage.emit(events)
+
+        tracks = await self.track_stage.process(events)
+        await self.track_stage.emit(tracks)
+
+        for event in events:
+            self._event_count += 1
+            self._log_event(event)
+
+        self._frame_count += 1
+        return PipelineFrameResult(
+            iq_frame=iq_frame,
+            dual_spectrogram=dual_spec,
+            bursts=bursts,
+            candidates=candidates,
+            classifications=classifications,
+            bearings=bearings,
+            events=events,
+            tracks=tracks,
+        )
 
     def _update_antenna_pre_bearing(
         self,
