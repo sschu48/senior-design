@@ -29,9 +29,84 @@ from pathlib import Path
 
 import numpy as np
 
-from src.dsp.detector import Detection, create_detectors, deduplicate
+from dataclasses import dataclass as _dataclass
+
+from src.dsp import cfar as _cfar
 from src.dsp.spectrum import compute_psd, remove_dc_offset
 from src.pipeline.contracts import ChannelRole, IQChannelFrame
+
+
+@_dataclass
+class _BenchDetection:
+    """Lightweight per-frame detection record used only inside hackrf_bench.
+
+    Replaces the V1 ``src.dsp.detector.Detection`` so this tool no longer
+    depends on the deleted V1 detector module.
+    """
+
+    freq_hz: float
+    bandwidth_hz: float
+    power_dbm: float
+    snr_db: float
+    bin_start: int
+    bin_end: int
+
+
+def _contiguous_runs(mask: np.ndarray) -> list[tuple[int, int]]:
+    """Return [(start, end_inclusive), ...] of contiguous True runs."""
+    runs: list[tuple[int, int]] = []
+    in_run = False
+    start = 0
+    for i, v in enumerate(mask):
+        if v and not in_run:
+            start = i
+            in_run = True
+        elif not v and in_run:
+            runs.append((start, i - 1))
+            in_run = False
+    if in_run:
+        runs.append((start, len(mask) - 1))
+    return runs
+
+
+def _detect_frame(
+    power_dbm: np.ndarray,
+    freq_hz: np.ndarray,
+    *,
+    cfar_cfg,
+    bin_width_hz: float,
+) -> list[_BenchDetection]:
+    """Run CA-CFAR + minimum-bandwidth filter and return detections.
+
+    Used for both omni and Yagi channels in this smoke harness — the
+    distinct OMNI/YAGI detector roles are part of the V2 Pipeline, but
+    this bench tool only needs a per-frame yes/no signal.
+    """
+    result = _cfar.apply(
+        power_dbm,
+        guard_cells=cfar_cfg.guard_cells,
+        reference_cells=cfar_cfg.reference_cells,
+        threshold_factor_db=cfar_cfg.threshold_factor_db,
+    )
+    runs = _contiguous_runs(result.detection_mask)
+    min_bins = max(1, int(np.ceil(cfar_cfg.min_detection_bw_hz / bin_width_hz)))
+    detections: list[_BenchDetection] = []
+    for start, end in runs:
+        num_bins = end - start + 1
+        if num_bins < min_bins:
+            continue
+        peak_idx = start + int(np.argmax(power_dbm[start : end + 1]))
+        detections.append(
+            _BenchDetection(
+                freq_hz=float(np.mean(freq_hz[start : end + 1])),
+                bandwidth_hz=num_bins * bin_width_hz,
+                power_dbm=float(power_dbm[peak_idx]),
+                snr_db=float(result.snr_db[peak_idx]),
+                bin_start=start,
+                bin_end=end,
+            )
+        )
+    return detections
 from src.sdr.capture import (
     DualIQSource,
     IQSource,
@@ -107,7 +182,7 @@ class ChannelAccumulator:
     def record_measurement(self, measurement: BandMeasurement) -> None:
         self.measurements.append(measurement)
 
-    def record_detection(self, detection: Detection, frame_index: int) -> None:
+    def record_detection(self, detection: _BenchDetection, frame_index: int) -> None:
         self.detections.append({
             "frame": frame_index,
             "freq_hz": detection.freq_hz,
@@ -496,7 +571,7 @@ async def run_bench(
     if args.dual:
         accumulators[ChannelRole.YAGI] = ChannelAccumulator(ChannelRole.YAGI, min_snr_db)
 
-    tripwire, cfar = create_detectors(config)
+    bin_width_hz = config.sdr.rx_a.sample_rate_hz / config.dsp.fft_size
     warmup_frames = _warmup_frames(config, args)
     collect_frames = _capture_frames(config, args, profile)
     num_samples = config.dsp.fft_size * 2
@@ -534,17 +609,19 @@ async def run_bench(
                     measurement_bw_hz=float(args.signal_bw or profile.measurement_bw_hz),
                 )
 
-                if channel.role == ChannelRole.OMNI:
-                    detections = tripwire.process(power_dbm, freq_hz)
-                else:
-                    detections = cfar.process(power_dbm, freq_hz)
+                detections = _detect_frame(
+                    power_dbm,
+                    freq_hz,
+                    cfar_cfg=config.dsp.cfar,
+                    bin_width_hz=bin_width_hz,
+                )
 
                 if is_warmup:
                     continue
 
                 acc = accumulators[channel.role]
                 acc.record_measurement(measurement)
-                for detection in deduplicate(detections):
+                for detection in detections:
                     acc.record_detection(detection, frame_index)
                 if args.save_iq:
                     acc.record_iq(channel.iq)

@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from aiohttp import web
 
-from src.dsp.detector import Detection, create_detectors
+from src.dsp import cfar as _cfar
 from src.dsp.persistence import PersistenceDetector
 from src.dsp.spectrum import compute_psd_from_config
 
@@ -58,8 +58,6 @@ class DashboardServer:
     _clients: set[web.WebSocketResponse] = field(default_factory=set, init=False, repr=False)
     _frame_count: int = field(default=0, init=False, repr=False)
     _freq_mhz: list[float] = field(default_factory=list, init=False, repr=False)
-    _tripwire: object | None = field(default=None, init=False, repr=False)
-    _cfar: object | None = field(default=None, init=False, repr=False)
     _detection_count: int = field(default=0, init=False, repr=False)
     _persistence: PersistenceDetector | None = field(default=None, init=False, repr=False)
 
@@ -80,9 +78,8 @@ class DashboardServer:
             threshold_db=6.0,
         )
 
-        # Initialize detectors if enabled
         if self.enable_detections:
-            self._init_detectors()
+            logger.info("Detection overlay enabled (CFAR per frame)")
 
         app = web.Application()
         app.router.add_get("/", self._handle_index)
@@ -133,12 +130,6 @@ class DashboardServer:
 
         return ws
 
-    def _init_detectors(self) -> None:
-        """Initialize tripwire + CFAR detectors from config."""
-        self._tripwire, self._cfar = create_detectors(self.config)
-        self._detection_count = 0
-        logger.info("Detection overlay enabled (tripwire + CFAR)")
-
     async def _broadcast_loop(self) -> None:
         """Read IQ → compute PSD → broadcast to all connected clients."""
         num_samples = self.config.dsp.fft_size
@@ -176,24 +167,11 @@ class DashboardServer:
                 "noise_floor_dbm": round(noise_floor_dbm, 1),
             }
 
-            # Run detectors if enabled
-            if self.enable_detections and self._tripwire and self._cfar:
-                dets: list[Detection] = []
-                dets.extend(self._tripwire.process(power_dbm, freq_hz))
-                dets.extend(self._cfar.process(power_dbm, freq_hz))
+            if self.enable_detections:
+                dets = self._cfar_detect(power_dbm, freq_hz)
                 if dets:
                     self._detection_count += len(dets)
-                    msg_data["detections"] = [
-                        {
-                            "freq_mhz": round(d.freq_hz / 1e6, 3),
-                            "bandwidth_mhz": round(d.bandwidth_hz / 1e6, 3),
-                            "power_dbm": round(d.power_dbm, 1),
-                            "snr_db": round(d.snr_db, 1),
-                            "bin_start": d.bin_start,
-                            "bin_end": d.bin_end,
-                        }
-                        for d in dets
-                    ]
+                    msg_data["detections"] = dets
                     msg_data["detection_count"] = self._detection_count
 
             msg = json.dumps(msg_data)
@@ -212,3 +190,51 @@ class DashboardServer:
             sleep_time = frame_interval - elapsed
             if sleep_time > 0:
                 await asyncio.sleep(sleep_time)
+
+    def _cfar_detect(self, power_dbm: np.ndarray, freq_hz: np.ndarray) -> list[dict]:
+        """Run a per-frame CFAR pass over the spectrum and return overlay dicts.
+
+        Replaces the V1 tripwire + CFAR overlay. The dashboard only needs a
+        list of currently-active bins for visualization; full V2 detection
+        runs in the Pipeline elsewhere.
+        """
+        cfar_cfg = self.config.dsp.cfar
+        result = _cfar.apply(
+            power_dbm,
+            guard_cells=cfar_cfg.guard_cells,
+            reference_cells=cfar_cfg.reference_cells,
+            threshold_factor_db=cfar_cfg.threshold_factor_db,
+        )
+        bin_width = self.config.sdr.rx_a.sample_rate_hz / self.config.dsp.fft_size
+        min_bins = max(
+            1, int(np.ceil(cfar_cfg.min_detection_bw_hz / bin_width))
+        )
+
+        runs: list[tuple[int, int]] = []
+        in_run = False
+        start = 0
+        for i, v in enumerate(result.detection_mask):
+            if v and not in_run:
+                start = i
+                in_run = True
+            elif not v and in_run:
+                runs.append((start, i - 1))
+                in_run = False
+        if in_run:
+            runs.append((start, len(result.detection_mask) - 1))
+
+        out: list[dict] = []
+        for s, e in runs:
+            num_bins = e - s + 1
+            if num_bins < min_bins:
+                continue
+            peak_idx = s + int(np.argmax(power_dbm[s : e + 1]))
+            out.append({
+                "freq_mhz": round(float(np.mean(freq_hz[s : e + 1])) / 1e6, 3),
+                "bandwidth_mhz": round(num_bins * bin_width / 1e6, 3),
+                "power_dbm": round(float(power_dbm[peak_idx]), 1),
+                "snr_db": round(float(result.snr_db[peak_idx]), 1),
+                "bin_start": s,
+                "bin_end": e,
+            })
+        return out

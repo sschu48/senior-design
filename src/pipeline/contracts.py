@@ -490,3 +490,60 @@ class BearingEstimate:
             raise ValueError(
                 "sweep_powers_dbm and sweep_azimuths_deg must have the same shape"
             )
+
+
+# ---------------------------------------------------------------------------
+# Composite inputs for stages that need more than one upstream message.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DualSpectrogramFrame:
+    """Paired omni/Yagi spectrograms for one frame.
+
+    Output of SpectrogramStage. BurstStage consumes ``omni``; the ``yagi``
+    field is held by the Pipeline and handed to BearingStage when cued.
+    """
+
+    frame_index: int
+    timestamp_s: float
+    omni: SpectrogramFrame
+    yagi: SpectrogramFrame
+
+    def __post_init__(self) -> None:
+        if self.frame_index < 0:
+            raise ValueError("frame_index must be non-negative")
+        if self.omni.role != ChannelRole.OMNI:
+            raise ValueError("omni must carry the OMNI role")
+        if self.yagi.role != ChannelRole.YAGI:
+            raise ValueError("yagi must carry the YAGI role")
+
+
+@dataclass(frozen=True)
+class BearingRequest:
+    """Input to BearingStage: yagi spectrogram + candidates to localize."""
+
+    yagi_spectrogram: SpectrogramFrame
+    classifications: tuple[Classification, ...]
+    azimuth_deg: float
+
+    def __post_init__(self) -> None:
+        if self.yagi_spectrogram.role != ChannelRole.YAGI:
+            raise ValueError("yagi_spectrogram must carry the YAGI role")
+        object.__setattr__(self, "classifications", tuple(self.classifications))
+
+
+@dataclass(frozen=True)
+class FuseRequest:
+    """Input to FuseStage: classifications joined with bearings + frame metadata."""
+
+    frame_index: int
+    timestamp_s: float
+    classifications: tuple[Classification, ...]
+    bearings: tuple[BearingEstimate, ...]
+
+    def __post_init__(self) -> None:
+        if self.frame_index < 0:
+            raise ValueError("frame_index must be non-negative")
+        object.__setattr__(self, "classifications", tuple(self.classifications))
+        object.__setattr__(self, "bearings", tuple(self.bearings))
