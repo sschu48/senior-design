@@ -55,6 +55,28 @@ dsp:
       min_sample_rate_hz: 15.36e6        # minimum for DJI OFDM decode
       sync_threshold: 0.7               # Zadoff-Chu correlation threshold
 
+  # -------------------------------------------------------------------------
+  # V2 pipeline (feature/v2-pipeline). Replaces tripwire+cfar parallel paths.
+  # See docs/V2_MIGRATION_PLAN.md.
+  # -------------------------------------------------------------------------
+  spectrogram:                           # V2: rolling time-frequency buffer
+    history_ms: 250                      # how far back the buffer remembers
+    fft_size: 4096                       # bins per frame; trades freq vs. time res
+
+  burst:                                 # V2 Stage 1: structural burst extractor
+    threshold_db: 8                      # above adaptive noise floor
+    noise_floor_window_sec: 5            # EMA window for protected noise floor
+    min_burst_duration_ms: 1             # reject single-frame transients
+    min_bandwidth_hz: 100e3              # reject sub-100kHz blobs
+
+  cluster:                               # V2: burst → candidate emission grouping
+    max_freq_gap_hz: 1.0e6               # bursts within this gap merge
+    max_time_gap_ms: 50                  # ... and this time gap
+
+  classifier:                            # V2 Stage 2: rule-based protocol ID
+    min_confidence: 0.3                  # below this → UNKNOWN_RF
+    protocols: ["elrs", "ocusync", "wifi"]   # which rules to run, in order
+
 antenna:
   yagi:
     # Active antenna depends on build phase:

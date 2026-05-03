@@ -89,6 +89,40 @@ class DecoderConfig:
 
 
 @dataclass(frozen=True)
+class SpectrogramConfig:
+    """V2 rolling time-frequency buffer config."""
+
+    history_ms: float
+    fft_size: int
+
+
+@dataclass(frozen=True)
+class BurstConfig:
+    """V2 Stage 1 burst extractor config."""
+
+    threshold_db: float
+    noise_floor_window_sec: float
+    min_burst_duration_ms: float
+    min_bandwidth_hz: float
+
+
+@dataclass(frozen=True)
+class ClusterConfig:
+    """V2 burst → candidate clustering config."""
+
+    max_freq_gap_hz: float
+    max_time_gap_ms: float
+
+
+@dataclass(frozen=True)
+class ClassifierConfig:
+    """V2 Stage 2 rule-based classifier config."""
+
+    min_confidence: float
+    protocols: tuple[str, ...]
+
+
+@dataclass(frozen=True)
 class DSPConfig:
     fft_size: int
     window: str
@@ -97,6 +131,10 @@ class DSPConfig:
     tripwire: TripwireConfig
     cfar: CFARConfig
     decoder: DecoderConfig
+    spectrogram: SpectrogramConfig
+    burst: BurstConfig
+    cluster: ClusterConfig
+    classifier: ClassifierConfig
 
 
 # --- Antenna configs ---
@@ -285,6 +323,32 @@ def load_config(path: str | Path | None = None) -> SentinelConfig:
         ),
     )
 
+    spec_raw = dsp_raw["spectrogram"]
+    spectrogram = SpectrogramConfig(
+        history_ms=float(spec_raw["history_ms"]),
+        fft_size=int(spec_raw["fft_size"]),
+    )
+
+    burst_raw = dsp_raw["burst"]
+    burst = BurstConfig(
+        threshold_db=float(burst_raw["threshold_db"]),
+        noise_floor_window_sec=float(burst_raw["noise_floor_window_sec"]),
+        min_burst_duration_ms=float(burst_raw["min_burst_duration_ms"]),
+        min_bandwidth_hz=float(burst_raw["min_bandwidth_hz"]),
+    )
+
+    cluster_raw = dsp_raw["cluster"]
+    cluster = ClusterConfig(
+        max_freq_gap_hz=float(cluster_raw["max_freq_gap_hz"]),
+        max_time_gap_ms=float(cluster_raw["max_time_gap_ms"]),
+    )
+
+    classifier_raw = dsp_raw["classifier"]
+    classifier = ClassifierConfig(
+        min_confidence=float(classifier_raw["min_confidence"]),
+        protocols=tuple(str(p) for p in classifier_raw["protocols"]),
+    )
+
     dsp = DSPConfig(
         fft_size=int(dsp_raw["fft_size"]),
         window=dsp_raw["window"],
@@ -293,6 +357,10 @@ def load_config(path: str | Path | None = None) -> SentinelConfig:
         tripwire=tripwire,
         cfar=cfar,
         decoder=decoder,
+        spectrogram=spectrogram,
+        burst=burst,
+        cluster=cluster,
+        classifier=classifier,
     )
 
     # --- antenna ---

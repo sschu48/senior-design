@@ -8,8 +8,11 @@ from src.pipeline.engine import DualPipelineEngine, PipelineEngine
 from src.sdr.capture import SignalDef, SyntheticDualSource, SyntheticSource
 from src.sdr.config import (
     AntennaConfig,
+    BurstConfig,
     CaptureConfig,
     CFARConfig,
+    ClassifierConfig,
+    ClusterConfig,
     DSPConfig,
     DecoderConfig,
     DetectionConfig,
@@ -22,6 +25,7 @@ from src.sdr.config import (
     SDRConfig,
     SentinelConfig,
     ServerConfig,
+    SpectrogramConfig,
     SystemConfig,
     TripwireConfig,
     YagiConfig,
@@ -72,6 +76,19 @@ def make_test_config() -> SentinelConfig:
                 dji_droneid=DJIDroneIDDecoderConfig(
                     enabled=False, min_sample_rate_hz=15.36e6, sync_threshold=0.7,
                 ),
+            ),
+            # V2 sections — unused by V1 engine, present so DSPConfig constructs.
+            spectrogram=SpectrogramConfig(history_ms=250.0, fft_size=4096),
+            burst=BurstConfig(
+                threshold_db=8.0,
+                noise_floor_window_sec=5.0,
+                min_burst_duration_ms=1.0,
+                min_bandwidth_hz=100e3,
+            ),
+            cluster=ClusterConfig(max_freq_gap_hz=1.0e6, max_time_gap_ms=50.0),
+            classifier=ClassifierConfig(
+                min_confidence=0.3,
+                protocols=("elrs", "ocusync", "wifi"),
             ),
         ),
         antenna=AntennaConfig(
