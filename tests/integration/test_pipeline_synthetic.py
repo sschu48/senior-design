@@ -35,7 +35,14 @@ def _config() -> object:
         min_burst_duration_ms=0.0,
         min_bandwidth_hz=0.0,
     )
-    new_dsp = dataclasses.replace(base.dsp, spectrogram=spec, burst=burst)
+    bearing = dataclasses.replace(
+        base.dsp.bearing,
+        # Tight sweep requirement so events can fire within the test loop.
+        min_sweep_samples=3,
+    )
+    new_dsp = dataclasses.replace(
+        base.dsp, spectrogram=spec, burst=burst, bearing=bearing
+    )
     return dataclasses.replace(base, dsp=new_dsp)
 
 

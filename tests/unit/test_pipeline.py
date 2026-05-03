@@ -105,7 +105,7 @@ class TestProcessFrame:
             "expected at least one event across the batch"
         )
 
-    def test_antenna_cued_when_strong_signal_present(self):
+    def test_antenna_enters_bearing_search_then_track_on_classification(self):
         cfg = make_v2_test_config()
         wifi = SignalDef(
             freq_offset_hz=0.0,
@@ -120,21 +120,25 @@ class TestProcessFrame:
 
         async def run():
             await pipe.start()
-            # Run enough frames for a burst to close and trigger cueing.
+            modes_seen = set()
             for _ in range(8):
                 await pipe.process_one_frame()
+                modes_seen.add(antenna.get_state().mode)
             quiet = _make_source()
             await source.stop()
             pipe.source_stage.source = quiet
             await quiet.start()
-            for _ in range(3):
+            for _ in range(8):
                 await pipe.process_one_frame()
-            mode = antenna.get_state().mode
+                modes_seen.add(antenna.get_state().mode)
             await quiet.stop()
-            return mode
+            return modes_seen
 
-        mode = asyncio.run(run())
-        assert mode in {ScanMode.CUE, ScanMode.TRACK, ScanMode.SCAN}
+        modes_seen = asyncio.run(run())
+        # The pipeline must have visited BEARING_SEARCH at some point — that's
+        # the architectural state added in Phase 1.5. ALARM and TRACK are also
+        # acceptable later states once a sweep completes.
+        assert ScanMode.BEARING_SEARCH in modes_seen, modes_seen
 
 
 class TestCounters:

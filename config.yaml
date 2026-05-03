@@ -77,6 +77,10 @@ dsp:
     min_confidence: 0.3                  # below this → UNKNOWN_RF
     protocols: ["elrs", "ocusync", "wifi"]   # which rules to run, in order
 
+  bearing:                               # V2 Stage 3: cued swept bearing
+    min_sweep_samples: 16                # samples collected before emitting an estimate
+    azimuth_bin_deg: 5                   # bucket width for peak finding
+
 antenna:
   yagi:
     # Active antenna depends on build phase:
@@ -104,11 +108,12 @@ antenna:
     serial_baud: 115200
 
 scan:
-  default_mode: "SCAN"                   # SCAN, CUE, TRACK, IDLE
-  scan_speed_deg_per_sec: 30             # azimuth sweep rate
+  default_mode: "SCAN"                   # SCAN, CUE, BEARING_SEARCH, TRACK, ALARM, IDLE
+  scan_speed_deg_per_sec: 30             # azimuth sweep rate (also used during BEARING_SEARCH)
   cue_timeout_sec: 5                     # return to SCAN if no detection
   track_oscillation_deg: 15              # ±15° around peak bearing
   track_lost_timeout_sec: 10             # return to SCAN after signal loss
+  alarm_duration_sec: 0.5                # ALARM hold time before settling into TRACK
 
 detection:
   min_snr_db: 10                         # minimum SNR to report detection

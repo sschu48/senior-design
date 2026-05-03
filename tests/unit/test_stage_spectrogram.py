@@ -4,6 +4,7 @@ import asyncio
 
 import numpy as np
 
+from src.dsp.spectrogram_buffer import SpectrogramBuffer
 from src.pipeline.contracts import (
     ChannelRole,
     DualSpectrogramFrame,
@@ -54,3 +55,43 @@ class TestSpectrogramStage:
             out.omni.center_freq_hz + offset_hz,
             atol=2 * bin_width,
         )
+
+
+class TestSpectrogramBuffer:
+    """Phase 1.5: SpectrogramStage maintains rolling history per role."""
+
+    def test_buffer_for_returns_per_role_buffer(self):
+        cfg = make_v2_test_config()
+        stage = SpectrogramStage(cfg)
+        omni = stage.buffer_for(ChannelRole.OMNI)
+        yagi = stage.buffer_for(ChannelRole.YAGI)
+        assert isinstance(omni, SpectrogramBuffer)
+        assert isinstance(yagi, SpectrogramBuffer)
+        assert omni is not yagi
+
+    def test_buffer_grows_with_frames(self):
+        cfg = make_v2_test_config()
+        stage = SpectrogramStage(cfg)
+        n = 2 * cfg.dsp.spectrogram.fft_size
+        iq = np.zeros(n, dtype=np.complex64)
+
+        for i in range(3):
+            frame = make_dual_iq_frame(
+                frame_index=i, timestamp_s=i * 1e-3,
+                num_samples=n, omni_iq=iq, yagi_iq=iq,
+            )
+            asyncio.run(stage.process(frame))
+
+        assert stage.buffer_for(ChannelRole.OMNI).size == 3
+        assert stage.buffer_for(ChannelRole.YAGI).size == 3
+
+    def test_reset_clears_buffers(self):
+        cfg = make_v2_test_config()
+        stage = SpectrogramStage(cfg)
+        n = 2 * cfg.dsp.spectrogram.fft_size
+        iq = np.zeros(n, dtype=np.complex64)
+        asyncio.run(stage.process(make_dual_iq_frame(
+            frame_index=0, num_samples=n, omni_iq=iq, yagi_iq=iq
+        )))
+        stage.reset()
+        assert stage.buffer_for(ChannelRole.OMNI).size == 0

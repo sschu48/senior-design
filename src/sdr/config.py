@@ -123,6 +123,14 @@ class ClassifierConfig:
 
 
 @dataclass(frozen=True)
+class BearingConfig:
+    """V2 Stage 3 swept-bearing config."""
+
+    min_sweep_samples: int
+    azimuth_bin_deg: float
+
+
+@dataclass(frozen=True)
 class DSPConfig:
     fft_size: int
     window: str
@@ -135,6 +143,7 @@ class DSPConfig:
     burst: BurstConfig
     cluster: ClusterConfig
     classifier: ClassifierConfig
+    bearing: BearingConfig
 
 
 # --- Antenna configs ---
@@ -183,6 +192,7 @@ class ScanConfig:
     cue_timeout_sec: float
     track_oscillation_deg: float
     track_lost_timeout_sec: float
+    alarm_duration_sec: float
 
 
 @dataclass(frozen=True)
@@ -349,6 +359,12 @@ def load_config(path: str | Path | None = None) -> SentinelConfig:
         protocols=tuple(str(p) for p in classifier_raw["protocols"]),
     )
 
+    bearing_raw = dsp_raw.get("bearing", {})
+    bearing = BearingConfig(
+        min_sweep_samples=int(bearing_raw.get("min_sweep_samples", 16)),
+        azimuth_bin_deg=float(bearing_raw.get("azimuth_bin_deg", 5.0)),
+    )
+
     dsp = DSPConfig(
         fft_size=int(dsp_raw["fft_size"]),
         window=dsp_raw["window"],
@@ -361,6 +377,7 @@ def load_config(path: str | Path | None = None) -> SentinelConfig:
         burst=burst,
         cluster=cluster,
         classifier=classifier,
+        bearing=bearing,
     )
 
     # --- antenna ---
@@ -403,6 +420,7 @@ def load_config(path: str | Path | None = None) -> SentinelConfig:
         cue_timeout_sec=float(scan_raw["cue_timeout_sec"]),
         track_oscillation_deg=float(scan_raw["track_oscillation_deg"]),
         track_lost_timeout_sec=float(scan_raw["track_lost_timeout_sec"]),
+        alarm_duration_sec=float(scan_raw.get("alarm_duration_sec", 0.5)),
     )
 
     # --- detection ---

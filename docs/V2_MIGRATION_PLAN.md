@@ -196,6 +196,13 @@ Single phase, single PR. We're not preserving V1, so there's no reason to spread
 - Update `tools/sentinel_runner.py`, `tools/bench_test.py`, `tools/bench_snr_sweep.py`, `src/ui/server.py` to construct/consume the new `Pipeline`.
 - **Exit criteria:** `pytest` green; dashboard renders against synthetic source; ELRS/OcuSync/WiFi synthetic fixtures produce labeled `DetectionEvent`s with bearings.
 
+### Phase 1.5 — Close architecture gaps to ARCHITECTURE_V2 doc (✅ landed 2026-05-03)
+- `SpectrogramBuffer` primitive + per-role rolling buffers in `SpectrogramStage` (§4.1)
+- Swept `BearingStage` — accumulates per-azimuth Yagi power across frames, emits when ≥`min_sweep_samples` collected, peak-finds by azimuth bucket (§4.3 Stage 3)
+- `BEARING_SEARCH` and `ALARM` modes added to `SimulatedController`; full state machine matches §4.4
+- `FuseStage` holds pending classifications until matching bearing arrives — `RFEvent` is now the operational ALARM event
+- New config: `dsp.bearing.{min_sweep_samples, azimuth_bin_deg}`, `scan.alarm_duration_sec`
+
 ### Phase 2 — Hardware validation
 - Run `tools/bench_test.py` against ESP32 beacon (CONTINUOUS, BURST, FHSS profiles) and HackRF dummy-drone TX.
 - Capture raw IQ for every test, file under `data/samples/YYYY-MM-DD_v2_*.cf32`.

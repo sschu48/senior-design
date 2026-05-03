@@ -13,12 +13,23 @@ from dataclasses import dataclass, field
 
 
 class ScanMode(enum.Enum):
-    """Antenna operating modes."""
+    """Antenna operating modes.
+
+    ``IDLE/SCAN/CUE/BEARING_SEARCH/TRACK/ALARM`` mirrors the state machine
+    in ``docs/ARCHITECTURE_V2.md`` §4.4.
+
+    - ``BEARING_SEARCH`` is the cued sweep across the azimuth range while
+      ``BearingStage`` accumulates per-azimuth Yagi power samples.
+    - ``ALARM`` is the transient state held briefly after a sweep completes
+      (peak found, event emitted) before locking into ``TRACK`` at the peak.
+    """
 
     IDLE = "IDLE"
     SCAN = "SCAN"
     CUE = "CUE"
+    BEARING_SEARCH = "BEARING_SEARCH"
     TRACK = "TRACK"
+    ALARM = "ALARM"
 
 
 @dataclass
@@ -94,6 +105,7 @@ class SimulatedController(AntennaController):
     cue_timeout_sec: float = 5.0
     track_oscillation_deg: float = 15.0
     track_lost_timeout_sec: float = 10.0
+    alarm_duration_sec: float = 0.5
 
     # Internal state
     _azimuth: float = field(default=0.0, init=False, repr=False)
@@ -103,6 +115,7 @@ class SimulatedController(AntennaController):
     _mode_timer: float = field(default=0.0, init=False, repr=False)
     _track_center: float = field(default=0.0, init=False, repr=False)
     _track_direction: int = field(default=1, init=False, repr=False)
+    _alarm_target_az: float = field(default=0.0, init=False, repr=False)
     _running: bool = field(default=False, init=False, repr=False)
 
     def start(self) -> None:
@@ -151,6 +164,29 @@ class SimulatedController(AntennaController):
         """Reset the TRACK lost timer (call on each new detection)."""
         self._mode_timer = 0.0
 
+    def start_bearing_search(self) -> None:
+        """Begin sweeping the full azimuth range to localize a cued candidate.
+
+        Called by ``Pipeline`` when ``ClassifyStage`` flags a high-confidence
+        candidate. The sweep continues until ``BearingStage`` collects enough
+        samples to estimate a bearing, at which point the pipeline calls
+        ``alarm()``.
+        """
+        self._mode = ScanMode.BEARING_SEARCH
+        self._mode_timer = 0.0
+        self._target_az = None
+
+    def alarm(self, peak_azimuth_deg: float) -> None:
+        """Transient ALARM state — slew toward peak, then transition to TRACK.
+
+        Used as the visual / temporal marker for one detection event before
+        the controller settles into ``TRACK`` at the peak bearing.
+        """
+        self._mode = ScanMode.ALARM
+        self._mode_timer = 0.0
+        self._alarm_target_az = self._clamp(peak_azimuth_deg)
+        self._target_az = self._alarm_target_az
+
     def _clamp(self, az: float) -> float:
         return max(self.azimuth_min_deg, min(az, self.azimuth_max_deg))
 
@@ -182,8 +218,14 @@ class SimulatedController(AntennaController):
         elif self._mode == ScanMode.CUE:
             self._tick_cue(dt)
 
+        elif self._mode == ScanMode.BEARING_SEARCH:
+            self._tick_bearing_search(dt)
+
         elif self._mode == ScanMode.TRACK:
             self._tick_track(dt)
+
+        elif self._mode == ScanMode.ALARM:
+            self._tick_alarm(dt)
 
     def _tick_scan(self, dt: float) -> None:
         """Sweep back and forth across the azimuth range."""
@@ -225,3 +267,23 @@ class SimulatedController(AntennaController):
         # Lost timeout → revert to SCAN
         if self._mode_timer >= self.track_lost_timeout_sec:
             self.set_mode(ScanMode.SCAN)
+
+    def _tick_bearing_search(self, dt: float) -> None:
+        """Sweep azimuth range while BearingStage accumulates samples.
+
+        No timeout — the pipeline transitions out of BEARING_SEARCH by
+        calling ``alarm()`` once a bearing estimate is available.
+        """
+        step = self.scan_speed_deg_per_sec * dt * self._scan_direction
+        self._azimuth += step
+        self._azimuth = self._clamp(self._azimuth)
+        if self._azimuth >= self.azimuth_max_deg:
+            self._scan_direction = -1
+        elif self._azimuth <= self.azimuth_min_deg:
+            self._scan_direction = 1
+
+    def _tick_alarm(self, dt: float) -> None:
+        """Slew to the alarm target azimuth, then settle into TRACK."""
+        self._move_toward(self._alarm_target_az, self.slew_rate_deg_per_sec, dt)
+        if self._mode_timer >= self.alarm_duration_sec:
+            self.start_track(self._alarm_target_az)

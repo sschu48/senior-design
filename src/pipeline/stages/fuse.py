@@ -1,9 +1,15 @@
 """FuseStage — FuseRequest → tuple[RFEvent, ...].
 
 Joins each Classification with its matching BearingEstimate (by
-``candidate_id``) and emits one ``RFEvent`` per Classification. Bearings
-are optional — if no bearing was produced for a candidate, the event is
-emitted without one.
+``candidate_id``) and emits one ``RFEvent`` per joined pair.
+
+In V2 the pairing is **delayed**: ClassifyStage emits a Classification on
+the frame the burst closes, but BearingStage may take many frames to
+complete the swept bearing measurement. FuseStage holds pending
+classifications keyed by ``candidate_id`` and emits the event only when
+the matching ``BearingEstimate`` arrives. This is what makes the emitted
+``RFEvent`` the operational ALARM event from
+``docs/ARCHITECTURE_V2.md`` §4.4.
 """
 
 from __future__ import annotations
@@ -26,26 +32,42 @@ class FuseStage(Stage[FuseRequest, tuple[RFEvent, ...]]):
     def __init__(self, config: SentinelConfig) -> None:
         super().__init__()
         self.config = config
+        self._pending: dict[str, Classification] = {}
+
+    @property
+    def pending_count(self) -> int:
+        return len(self._pending)
+
+    def reset(self) -> None:
+        self._pending.clear()
 
     async def process(self, request: FuseRequest) -> tuple[RFEvent, ...]:
-        bearings_by_id: dict[str, BearingEstimate] = {
-            b.candidate_id: b for b in request.bearings
-        }
-        events: list[RFEvent] = []
+        # Stage classifications until their bearing arrives.
         for cls in request.classifications:
-            bearing = bearings_by_id.get(cls.candidate_id)
+            self._pending[cls.candidate_id] = cls
+
+        # Match bearings to pending classifications.
+        events: list[RFEvent] = []
+        for bearing in request.bearings:
+            cls = self._pending.pop(bearing.candidate_id, None)
+            if cls is None:
+                # Bearing without a pending classification — drop it. This
+                # shouldn't happen given the pipeline order, but the
+                # contract is "events require both", so we honor that.
+                continue
             events.append(self._build_event(cls, bearing, request))
         return tuple(events)
+
+    # ---- internals ------------------------------------------------------
 
     def _build_event(
         self,
         cls: Classification,
-        bearing: BearingEstimate | None,
+        bearing: BearingEstimate,
         request: FuseRequest,
     ) -> RFEvent:
         cand = cls.candidate
         peak_burst = _peak_burst(cand)
-
         return RFEvent(
             event_id=f"evt-{request.frame_index}-{cand.candidate_id}",
             role=cand.role,
@@ -59,7 +81,7 @@ class FuseStage(Stage[FuseRequest, tuple[RFEvent, ...]]):
             source="v2-pipeline",
             bin_start=peak_burst.bin_start,
             bin_end=peak_burst.bin_end,
-            bearing_deg=None if bearing is None else bearing.bearing_deg,
+            bearing_deg=bearing.bearing_deg,
             duty_cycle=cand.duty_cycle,
             hop_rate_hz=cand.hop_rate_hz,
             supporting_frames=peak_burst.frame_end_index
@@ -68,13 +90,11 @@ class FuseStage(Stage[FuseRequest, tuple[RFEvent, ...]]):
             features={
                 "classifier_confidence": cls.confidence,
                 "classifier_reasons": list(cls.reasons),
-                "bearing_confidence": (
-                    None if bearing is None else bearing.confidence
-                ),
+                "bearing_confidence": bearing.confidence,
+                "bearing_peak_power_dbm": bearing.peak_power_dbm,
             },
         )
 
 
 def _peak_burst(candidate: Candidate) -> Burst:
-    """Return the burst within the candidate with the highest peak power."""
     return max(candidate.bursts, key=lambda b: b.peak_power_dbm)

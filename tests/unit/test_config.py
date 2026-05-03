@@ -6,6 +6,7 @@ import pytest
 
 from src.sdr.config import (
     AntennaConfig,
+    BearingConfig,
     BurstConfig,
     CaptureConfig,
     CFARConfig,
@@ -295,6 +296,25 @@ class TestClassifierConfig:
         cfg = load_config()
         # Tuples are immutable; this guards against accidental list usage.
         assert isinstance(cfg.dsp.classifier.protocols, tuple)
+
+
+class TestBearingConfig:
+    """Tests for V2 dsp.bearing section (Phase 1.5)."""
+
+    def test_bearing_fields(self):
+        cfg = load_config()
+        b = cfg.dsp.bearing
+        assert isinstance(b, BearingConfig)
+        assert b.min_sweep_samples == 16
+        assert b.azimuth_bin_deg == 5.0
+
+
+class TestScanAlarmDuration:
+    """Tests for the alarm_duration_sec field added in Phase 1.5."""
+
+    def test_alarm_duration_sec(self):
+        cfg = load_config()
+        assert cfg.scan.alarm_duration_sec == 0.5
 
 
 class TestBadPath:

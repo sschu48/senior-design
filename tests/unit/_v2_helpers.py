@@ -39,6 +39,12 @@ def make_v2_test_config() -> SentinelConfig:
     )
     cluster = dataclasses.replace(base.dsp.cluster, max_time_gap_ms=20.0)
     classifier = dataclasses.replace(base.dsp.classifier, min_confidence=0.3)
+    bearing = dataclasses.replace(
+        base.dsp.bearing,
+        # Tight sweep requirement so tests complete a bearing in a few frames.
+        min_sweep_samples=3,
+        azimuth_bin_deg=2.0,
+    )
 
     new_dsp = dataclasses.replace(
         base.dsp,
@@ -46,6 +52,7 @@ def make_v2_test_config() -> SentinelConfig:
         burst=burst,
         cluster=cluster,
         classifier=classifier,
+        bearing=bearing,
     )
     return dataclasses.replace(base, dsp=new_dsp)
 
