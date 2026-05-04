@@ -6,8 +6,12 @@ import pytest
 
 from src.sdr.config import (
     AntennaConfig,
+    BearingConfig,
+    BurstConfig,
     CaptureConfig,
     CFARConfig,
+    ClassifierConfig,
+    ClusterConfig,
     DSPConfig,
     DecoderConfig,
     DetectionConfig,
@@ -18,6 +22,7 @@ from src.sdr.config import (
     SDRConfig,
     SentinelConfig,
     ServerConfig,
+    SpectrogramConfig,
     SystemConfig,
     TripwireConfig,
     YagiConfig,
@@ -240,6 +245,76 @@ class TestFrozenDataclasses:
         cfg = load_config()
         with pytest.raises(dataclasses.FrozenInstanceError):
             cfg.scan.cue_timeout_sec = 99  # type: ignore[misc]
+
+
+class TestSpectrogramConfig:
+    """Tests for V2 dsp.spectrogram section."""
+
+    def test_spectrogram_fields(self):
+        cfg = load_config()
+        s = cfg.dsp.spectrogram
+        assert isinstance(s, SpectrogramConfig)
+        assert s.history_ms == 250
+        assert s.fft_size == 4096
+
+
+class TestBurstConfig:
+    """Tests for V2 dsp.burst section."""
+
+    def test_burst_fields(self):
+        cfg = load_config()
+        b = cfg.dsp.burst
+        assert isinstance(b, BurstConfig)
+        assert b.threshold_db == 8
+        assert b.noise_floor_window_sec == 5
+        assert b.min_burst_duration_ms == 1
+        assert b.min_bandwidth_hz == 100e3
+
+
+class TestClusterConfig:
+    """Tests for V2 dsp.cluster section."""
+
+    def test_cluster_fields(self):
+        cfg = load_config()
+        c = cfg.dsp.cluster
+        assert isinstance(c, ClusterConfig)
+        assert c.max_freq_gap_hz == 1.0e6
+        assert c.max_time_gap_ms == 50
+
+
+class TestClassifierConfig:
+    """Tests for V2 dsp.classifier section."""
+
+    def test_classifier_fields(self):
+        cfg = load_config()
+        c = cfg.dsp.classifier
+        assert isinstance(c, ClassifierConfig)
+        assert c.min_confidence == 0.3
+        assert c.protocols == ("elrs", "ocusync", "wifi")
+
+    def test_protocols_is_tuple(self):
+        cfg = load_config()
+        # Tuples are immutable; this guards against accidental list usage.
+        assert isinstance(cfg.dsp.classifier.protocols, tuple)
+
+
+class TestBearingConfig:
+    """Tests for V2 dsp.bearing section (Phase 1.5)."""
+
+    def test_bearing_fields(self):
+        cfg = load_config()
+        b = cfg.dsp.bearing
+        assert isinstance(b, BearingConfig)
+        assert b.min_sweep_samples == 16
+        assert b.azimuth_bin_deg == 5.0
+
+
+class TestScanAlarmDuration:
+    """Tests for the alarm_duration_sec field added in Phase 1.5."""
+
+    def test_alarm_duration_sec(self):
+        cfg = load_config()
+        assert cfg.scan.alarm_duration_sec == 0.5
 
 
 class TestBadPath:

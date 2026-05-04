@@ -221,3 +221,75 @@ class TestStateReporting:
         ctrl = make_controller()
         ctrl.set_mode(ScanMode.SCAN)
         assert ctrl.get_state().is_moving is True
+
+
+# ===========================================================================
+# BEARING_SEARCH mode (Phase 1.5)
+# ===========================================================================
+
+
+class TestBearingSearch:
+    def test_start_bearing_search_enters_mode(self):
+        ctrl = make_controller()
+        ctrl.set_mode(ScanMode.SCAN)
+        ctrl.start_bearing_search()
+        assert ctrl.get_state().mode == ScanMode.BEARING_SEARCH
+
+    def test_bearing_search_sweeps_azimuth(self):
+        ctrl = make_controller(
+            azimuth_min_deg=0.0, azimuth_max_deg=180.0, scan_speed_deg_per_sec=30.0
+        )
+        ctrl.start_bearing_search()
+        positions = []
+        for _ in range(100):
+            ctrl.tick(0.1)
+            positions.append(ctrl.get_state().azimuth_deg)
+        # Sweep should move across a meaningful arc.
+        assert max(positions) - min(positions) > 50.0
+
+    def test_bearing_search_no_timeout(self):
+        # Unlike CUE, BEARING_SEARCH does not auto-revert; it persists until
+        # the pipeline calls alarm() or set_mode().
+        ctrl = make_controller(cue_timeout_sec=0.5)
+        ctrl.start_bearing_search()
+        for _ in range(20):
+            ctrl.tick(0.1)
+        assert ctrl.get_state().mode == ScanMode.BEARING_SEARCH
+
+
+# ===========================================================================
+# ALARM mode (Phase 1.5)
+# ===========================================================================
+
+
+class TestAlarm:
+    def test_alarm_enters_mode(self):
+        ctrl = make_controller()
+        ctrl.start_bearing_search()
+        ctrl.alarm(120.0)
+        assert ctrl.get_state().mode == ScanMode.ALARM
+
+    def test_alarm_slews_to_peak(self):
+        # Long alarm window so we can verify the slew before TRACK takes over.
+        ctrl = make_controller(slew_rate_deg_per_sec=180.0, alarm_duration_sec=10.0)
+        ctrl.alarm(90.0)
+        for _ in range(6):  # 0.6s × 180 deg/s = 108° → easily reaches 90°
+            ctrl.tick(0.1)
+        assert abs(ctrl.get_state().azimuth_deg - 90.0) < 1.0
+        assert ctrl.get_state().mode == ScanMode.ALARM
+
+    def test_alarm_settles_into_track(self):
+        ctrl = make_controller(alarm_duration_sec=0.3, slew_rate_deg_per_sec=120.0)
+        ctrl.alarm(90.0)
+        # Tick past the alarm duration.
+        for _ in range(8):
+            ctrl.tick(0.1)
+        assert ctrl.get_state().mode == ScanMode.TRACK
+
+    def test_alarm_target_clamped_to_range(self):
+        ctrl = make_controller(azimuth_min_deg=0.0, azimuth_max_deg=180.0)
+        ctrl.alarm(500.0)  # outside range
+        # Slew toward clamped target.
+        for _ in range(50):
+            ctrl.tick(0.1)
+        assert ctrl.get_state().azimuth_deg <= 180.0

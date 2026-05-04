@@ -18,7 +18,7 @@ Track, identify, and localize drones passively via RF emissions at 2.4GHz. No ac
 
 ---
 
-## 🤖 Codex'S ROLE
+## 🤖 AGENT'S ROLE
 
 You are the **lead developer, RF engineer, algorithm designer, and repo manager** for SENTINEL.
 
@@ -38,26 +38,38 @@ You are the **lead developer, RF engineer, algorithm designer, and repo manager*
 
 ```
 sentinel/
-├── AGENTS.md               ← you are here
+├── AGENTS.md               ← you are here (CLAUDE.md is the same content)
 ├── README.md
 ├── docs/
+│   ├── ARCHITECTURE_V2.md  ← detection-strategy rationale (read first)
+│   ├── V2_MIGRATION_PLAN.md← phase-by-phase implementation plan
 │   ├── rf-research/        ← frequency notes, drone emission profiles
 │   ├── hardware/           ← antenna specs, SDR specs, mount diagrams
 │   └── test-logs/          ← structured test results
 ├── src/
-│   ├── sdr/                ← SDR capture, tuning, sample streaming
-│   ├── dsp/                ← filters, FFT, detection algorithms
-│   ├── antenna/            ← pan/tilt control, scan patterns
-│   ├── pipeline/           ← async detection engine
-│   └── ui/                 ← live display / dashboard
+│   ├── sdr/                ← SDR capture, tuning, sample streaming, config loader
+│   ├── dsp/                ← FFT primitives + DSP utilities
+│   │   ├── spectrum.py     ← Welch PSD
+│   │   ├── noise_floor.py  ← protected EMA noise-floor estimator
+│   │   ├── cfar.py         ← CA-CFAR kernel
+│   │   ├── spectrogram_buffer.py  ← rolling time-frequency buffer
+│   │   ├── persistence.py  ← per-bin duty-cycle tracker
+│   │   └── classifiers/    ← rule-based protocol IDs (elrs, ocusync, wifi)
+│   ├── antenna/            ← pan/tilt controller (SCAN/CUE/BEARING_SEARCH/TRACK/ALARM)
+│   ├── pipeline/           ← V2 staged DAG
+│   │   ├── stage.py        ← Stage[InMsg, OutMsg] base class
+│   │   ├── contracts.py    ← typed messages
+│   │   ├── pipeline.py     ← Pipeline runner (assembles stages, drives antenna)
+│   │   └── stages/         ← one file per stage
+│   └── ui/                 ← aiohttp WebSocket dashboard + live spectrum
 ├── tests/
-│   ├── unit/
-│   ├── integration/
-│   └── field/              ← field test scripts & data
+│   ├── unit/               ← per-primitive and per-stage tests
+│   ├── integration/        ← end-to-end Pipeline tests on synthetic IQ
+│   └── field/              ← hardware/field test scripts and logs
 ├── data/
 │   ├── samples/            ← raw IQ captures (.cf32 / .sigmf)
 │   └── signatures/         ← known drone RF fingerprints
-└── tools/                  ← calibration, replay, analysis utilities
+└── tools/                  ← bench harnesses, runner, dummy-drone TX
 ```
 
 ---
@@ -72,7 +84,7 @@ sentinel/
 6. **Logging:** Structured JSON logs. Every detection event gets a timestamp, bearing, confidence score, and SNR.
 7. **Tests:** Every algorithm gets a unit test with synthetic IQ data before field use.
 8. **Commits:** Conventional commits. `feat:`, `fix:`, `dsp:`, `rf:`, `test:`, `docs:`.
-9. **Branches:** `main` (stable) → `dev` (integration) → `feature/*` or `experiment/*`.
+9. **Branches:** `main` (stable, validated) ← `feature/*` or `experiment/*` via PR. No direct pushes to `main`. No `dev` branch.
 10. **No magic numbers.** Name every constant. Comment the *why*, not the *what*.
 
 ---
@@ -95,45 +107,47 @@ sentinel/
 - **IQ format:** 32-bit float complex (numpy complex64)
 
 ### Antenna System
-- **Type:** High-gain directional (Yagi or patch)
-- **Axes:** Azimuth (pan) + Elevation (tilt)
+- **Type:** High-gain directional Yagi (cued) + omni dipole (always-on)
+- **Axes:** Azimuth (pan); elevation fixed at +10° in v1
 - **Control:** Stepper or servo via GPIO / serial
-- **Scan modes:** `SWEEP` (raster), `TRACK` (locked on signal), `IDLE`
+- **Scan modes:** `IDLE → SCAN → CUE → BEARING_SEARCH → ALARM → TRACK` (ARCHITECTURE_V2 §4.4)
 
 ---
 
-## 🧠 ALGORITHM PIPELINE
+## 🧠 ALGORITHM PIPELINE (V2)
+
+The pipeline is a typed staged DAG. Each stage is one file in
+`src/pipeline/stages/`, takes one typed input, returns one typed output.
+The `Pipeline` runner threads them together and drives the antenna state
+machine off the classifier output. Full rationale:
+`docs/ARCHITECTURE_V2.md`.
 
 ```
-IQ Samples
-    │
+DualIQSource
+    │  DualIQFrame
     ▼
-[DC Offset Removal]
-    │
-    ▼
-[Bandpass Filter] → 2.4–2.5GHz passband
-    │
-    ▼
-[FFT / PSD Estimation] → Welch method, 1024–4096 pts
-    │
-    ▼
-[Threshold Detection] → Adaptive noise floor (CFAR)
-    │
-    ▼
-[Feature Extraction] → BW, center freq, burst pattern, FHSS signature
-    │
-    ▼
-[Classifier] → Rule-based first; ML fingerprinting later
-    │
-    ▼
-[Bearing Estimator] → Peak RSSI per antenna position → AoA
-    │
-    ▼
-[Target Tracker] → Kalman filter on bearing + elevation
-    │
-    ▼
-[Alert / Display]
+Source ─► Spectrogram ─► Burst ─► Cluster ─► Classify ─┐
+                                                       │ cue
+                                                       ▼
+                                                   Bearing ─► Fuse ─► Track
+                                                   (cued     (joins   (frame-
+                                                   Yagi      classif. to-frame
+                                                   sweep)    + bearing) RFEvent
+                                                                       grouping)
 ```
+
+Per-stage responsibilities:
+
+| Stage | Reads | Emits | Notes |
+|---|---|---|---|
+| `Source` | (none) | `DualIQFrame` | Wraps `DualIQSource`; one frame = `2 × fft_size` samples |
+| `Spectrogram` | `DualIQFrame` | `DualSpectrogramFrame` | Welch PSD per role; appends to per-role `SpectrogramBuffer` |
+| `Burst` | `SpectrogramFrame` (omni) | `tuple[Burst, ...]` | Protected-EMA noise floor + multi-frame run tracking |
+| `Cluster` | `tuple[Burst, ...]` | `tuple[Candidate, ...]` | Phase 1: 1:1 wrap (multi-burst FHSS deferred) |
+| `Classify` | `tuple[Candidate, ...]` | `tuple[Classification, ...]` | Rule-based (`dsp/classifiers/`); UNKNOWN_RF fallthrough |
+| `Bearing` | `BearingRequest` (yagi) | `tuple[BearingEstimate, ...]` | Cued sweep — accumulates per-azimuth Yagi power until min_sweep_samples reached |
+| `Fuse` | `FuseRequest` | `tuple[RFEvent, ...]` | Joins pending classifications to bearings by `candidate_id` |
+| `Track` | `tuple[RFEvent, ...]` | `tuple[TrackedEmitter, ...]` | Frequency/time-gap matching; deterministic `trk-N` IDs |
 
 ---
 
@@ -191,12 +205,13 @@ When researching: **cite papers, datasheets, or SDR community sources**. No spec
 
 ## 📋 SESSION STARTUP CHECKLIST
 
-When beginning a new work session, Codex should:
-1. State current sprint goal
-2. List any open issues or blockers
-3. Confirm hardware config hasn't changed
-4. Run unit tests before any new feature work
-5. Pull latest `dev` before branching
+When beginning a new work session, the agent should:
+1. Read `docs/V2_MIGRATION_PLAN.md` for current phase + next-up work
+2. Check the active branch (`git status`) — V2 work lives on `feature/v2-pipeline`
+3. List any open issues or blockers
+4. Confirm hardware config hasn't changed
+5. Run unit tests before any new feature work (`make test`)
+6. Open a feature branch off `main` for new work; never push directly to `main`
 
 ---
 
@@ -213,31 +228,40 @@ When beginning a new work session, Codex should:
 
 ## 🏁 CURRENT PHASE
 
+> Active branch: **`feature/v2-pipeline`** (PR #1, draft).
+> `main` is V1 — deprecated, never validated. Don't build off it until V2 merges.
+
 ```
-[PHASE 1: FOUNDATION]  ← YOU ARE HERE
-  ✦ SDR capture pipeline (SyntheticSource + USRPSource)
-  ✦ Basic FFT detection (Welch PSD)
-  ✦ CFAR detection (CA-CFAR on yagi channel)
-  ✦ Antenna control scaffold (SimulatedController)
-  ✦ Config system (frozen dataclasses)
-  ○ RemoteID decoder integration
-  ○ DJI DroneID decoder integration
-  ○ Radar app ↔ pipeline WebSocket
+[PHASE 0: V2 SCAFFOLD]            ← done (commit e16f6bd)
+  ✦ Stage[InMsg, OutMsg] protocol + base class
+  ✦ V2 contract types (SpectrogramFrame, Burst, Candidate, ...)
+  ✦ V2 config sections (dsp.spectrogram/burst/cluster/classifier)
 
-[PHASE 2: DETECTION]
-  ○ CFAR field tuning
-  ○ FHSS classifier
-  ○ Bearing estimation (AoA)
+[PHASE 1: V2 PIPELINE]            ← done (commit d2c4bf2)
+  ✦ All 8 stages implemented
+  ✦ Pipeline runner with antenna state machine
+  ✦ Rule-based classifiers (ELRS, OcuSync, WiFi)
+  ✦ V1 deleted; consumers migrated (UI server, bench tools, runner)
 
-[PHASE 3: TRACKING]
-  ○ Kalman tracker
-  ○ Scan → Track handoff
-  ○ Multi-target handling
+[PHASE 1.5: ARCHITECTURE GAP-CLOSE]  ← done (commit c78663a)
+  ✦ Rolling SpectrogramBuffer per role
+  ✦ Swept BearingStage (per-candidate sweep accumulator)
+  ✦ BEARING_SEARCH + ALARM modes
+  ✦ FuseStage holds pending classifications until matching bearing
 
-[PHASE 4: FIELD OPS]
-  ○ Field-hardened UI
-  ○ Alert system
-  ○ Signature library
+[PHASE 2: HARDWARE VALIDATION]    ← YOU ARE HERE
+  ○ ESP32 beacon bench run (CONTINUOUS / BURST / FHSS profiles)
+  ○ HackRF dummy-drone TX bench run (DroneID / OcuSync / tone)
+  ○ Capture IQ; file docs/test-logs/ entries
+  ○ Tune dsp.bearing.min_sweep_samples and azimuth_bin_deg
+  ○ Tune dsp.burst threshold / noise-floor window for real RF
+
+[PHASE 3: ENRICHMENT]             (post-merge)
+  ○ Multi-burst clustering for FHSS hop-train detection
+  ○ RemoteID / DJI DroneID matched-filter decoders
+  ○ Cyclostationary feature path
+  ○ ML classifier on spectrogram patches (optional)
+  ○ Real Yagi rotator + servo drivers
 ```
 
 ---
